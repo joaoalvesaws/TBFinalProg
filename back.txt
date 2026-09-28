@@ -1,0 +1,26 @@
+1. O Desafio Desenvolver uma aplicação web inovadora e funcional que resolva um problema real vivenciado no câmpus escolar, na cidade de Chapecó ou na comunidade regional, conectando recursos modernos de inteligência artificial a uma arquitetura full stack integrada. 
+
+Problema identificado: identificamos que gestores e contribuintes tem dificuldade em gerenciar escalas, realizar trocas de escala (plantoes) e visualizar com facilidade seus compromissos
+–
+Proposta : fazer uma aplicacao web para gestao de escalas com IA
+Ou seja, a fazemos a parte grafica e de backend e a IA fica responsável por gerar as escalas (sequência)
+–
+
+Locais que envolvem esta aplicacao: igrejas, voluntariados, corpo de bombeiros, orgaos publicos, locais que envolvem plantoes e rotatividade de pessoas
+
+–
+Como isso facilita o trabalho do líder?
+Este sistema gera facilidade em gerar escalas de forma fácil e rápida, com muito menos trabalho e mais assertividade, possibilitando o líder de obter mais tempo para desempenhar suas tarefas.
+–
+Como isso facilita o trabalho do liderado?
+O sistema resulta em uma facilidade de visualizar a escala de forma simples e rápida, e também possibilita realizar trocas sem a necessidade de aprovacao/auditoria de terceiros (líder), assim com menos burocracia e mais autonomia.
+–
+O que a IA irá desempenhar? 
+A IA terá como missão gerar as escalas quando solicitado, seguindo as regras de negócios e não infringindo nenhuma definição.
+–
+O que é necessário para o sistema funcionar?
+
+Uma interface web, banco de dados, cadastro de usuários + admin(líder) 
+–
+MVP :
+
