@@ -37,7 +37,7 @@ if (isset($_GET['status'])) {
         <div class="row justify-content-center">
             <div class="col-md-4">
                 <div class="card shadow p-4 rounded-3">
-                    <h4 class="text-center mb-4">Faz o login ai (nao ta funcionando) so pra mostrar algo</h4>
+                    <h4 class="text-center mb-4">Tela de login de teste</h4>
                     <?php if (!empty($mensagem)): ?>
                         <div class="alert alert-<?= $tipoAlerta ?> alert-dismissible fade show" role="alert">
                             <?= htmlspecialchars($mensagem) ?>
