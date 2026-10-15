@@ -1,6 +1,5 @@
 <?php
 
-// src/cron_avisos.php
 // Roda a cada minuto (cron). Faz duas coisas:
 //   1) Cria os lembretes automáticos (escalas que acontecem nas próximas 48h)
 //   2) Envia as mensagens pendentes da tabela fila_envios
