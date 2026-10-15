@@ -6,6 +6,7 @@ services:
     volumes:
       - ./src:/var/www/html
       - ./config:/var/www/config
+      - ./vendor:/var/www/vendor
     depends_on:
       - db
 

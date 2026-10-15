@@ -23,7 +23,7 @@
 
 require __DIR__ . '/includes/sessao.php';
 require __DIR__ . '/regras.php';
-require __DIR__ . '/includes/auditoria.php';
+
 
 $usuario   = exigirLogin();
 $usuarioId = (int) $usuario['id'];

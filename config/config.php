@@ -12,6 +12,11 @@ return [
         'usuario' => 'escalas',
         'senha'   => 'escalas_dev',
         'charset' => 'utf8mb4',
+        'app_url' => 'http://localhost:8080',
+        'notificacoes' => [
+        'email'    => ['modo' => 'simulacao'],
+        'whatsapp' => ['modo' => 'simulacao'],
+   ],
     ],
 
 ];
