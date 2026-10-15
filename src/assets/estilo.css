@@ -1,0 +1,130 @@
+/* Tema Kosmos: só cores e ajustes. A estrutura vem do Bootstrap (CDN). */
+:root {
+  --k-lateral: #1f1f3b;
+  --k-fundo: #2b2b4c;
+  --k-celula: #35355f;
+  --k-celula-destaque: #4a4a98;
+  --k-login-esq: #2a2a45;
+  --k-login-dir: #424263;
+  --k-input: #4747b0;
+  --k-botao: #6b6be0;
+  --k-menu-ativo: #5b5bd6;
+  --k-texto-suave: #c9c9de;
+  --k-sabado: #3b3bb5;
+  --k-domingo: #d9b92e;
+  --k-indisp: #c2415a;
+}
+body { font-family: 'Inter', system-ui, sans-serif; background: var(--k-fundo); color: #fff; }
+.k-texto-suave { color: var(--k-texto-suave); }
+a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* ---------- Login ---------- */
+.k-fundo-login-esq { background: var(--k-login-esq); }
+.k-fundo-login-dir { background: var(--k-login-dir); }
+.k-login-texto { max-width: 440px; margin-inline: auto; }
+.k-login-titulo { font-size: clamp(1.75rem, 3vw, 2.25rem); font-weight: 700; line-height: 1.2; }
+.k-login-form { max-width: 420px; margin-inline: auto; }
+.k-input { background: var(--k-input); border: 0; color: #fff; border-radius: 1rem; padding: 1rem 1.25rem; }
+.k-input:focus { background: var(--k-input); color: #fff; box-shadow: 0 0 0 .2rem rgba(255,255,255,.35); }
+.k-btn-principal { background: var(--k-botao); color: #fff; border: 0; border-radius: 1rem; padding: .9rem; font-size: 1.15rem; }
+.k-btn-principal:hover, .k-btn-principal:focus { background: #7b7bee; color: #fff; }
+.k-logo-aneis { position: absolute; left: 28px; bottom: 28px; width: 76px; fill: none; stroke: #3d3d6e; stroke-width: 1.5; }
+
+/* ---------- Dashboard ---------- */
+.k-lateral { background: var(--k-lateral); width: 250px; }
+.k-lateral .nav-link { color: #fff; padding: .7rem 1rem; border-radius: .6rem; font-size: 1.05rem; }
+.k-lateral .nav-link:hover { background: rgba(255,255,255,.08); }
+.k-lateral .nav-link.active { background: var(--k-menu-ativo); }
+.k-lateral .k-logo-aneis { position: static; width: 48px; }
+.k-selo { background: #e6e6ee; color: #1f1f3b; font-weight: 600; font-size: .7rem; border-radius: 1rem; padding: .25rem .7rem; }
+.k-btn-claro { background: #dcdce6; color: #1f1f3b; border: 0; border-radius: .6rem; font-weight: 500; }
+.k-btn-claro:hover { background: #fff; color: #1f1f3b; }
+.k-ano { background: var(--k-lateral); color: #fff; border: 0; border-radius: .6rem; font-weight: 600; width: auto; }
+.k-seta { color: #fff; text-decoration: none; padding: 0 .4rem; }
+
+.k-legenda { display: inline-flex; align-items: center; gap: .4rem; margin-right: 1rem; }
+.k-ponto { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.k-ponto-sab { background: var(--k-sabado); }
+.k-ponto-dom { background: var(--k-domingo); }
+
+.k-calendario { display: grid; grid-template-columns: repeat(7, 1fr); gap: .6rem; }
+.k-dia-semana { text-align: center; color: var(--k-texto-suave); padding-bottom: .25rem; }
+.k-dia { background: var(--k-celula); border-radius: .75rem; min-height: 64px; padding: .5rem .6rem; font-size: .9rem; position: relative; }
+.k-dia .k-num { display: block; font-size: .75rem; color: var(--k-texto-suave); }
+.k-dia-vazio { background: transparent; }
+.k-dia-sem-escala { opacity: .6; }
+.k-dia-sab::after, .k-dia-dom::after { content: ''; position: absolute; top: .55rem; right: .55rem; width: 8px; height: 8px; border-radius: 50%; }
+.k-dia-sab::after { background: var(--k-sabado); }
+.k-dia-dom::after { background: var(--k-domingo); }
+
+@media (max-width: 575.98px) {
+  .k-calendario { gap: .3rem; }
+  .k-dia { min-height: 54px; padding: .3rem; font-size: .72rem; }
+  .k-dia-semana { font-size: .75rem; }
+}
+
+/* ---------- Página Calendário ---------- */
+.k-topbar { background: var(--k-lateral); border-bottom: 1px solid rgba(255,255,255,.08); }
+.k-conteudo { max-width: 1000px; }
+.k-btn-nav { background: var(--k-lateral); color: #fff; border: 1px solid rgba(255,255,255,.15); border-radius: .6rem; }
+.k-btn-nav:hover { background: var(--k-celula); color: #fff; }
+.k-calendario-grande .k-dia { min-height: 96px; padding: .6rem .7rem; border-top: 4px solid rgba(255,255,255,.12); display: flex; flex-direction: column; justify-content: space-between; }
+.k-calendario-grande .k-dia::after { display: none; }
+.k-calendario-grande .k-dia-sab { border-top-color: var(--k-sabado); }
+.k-calendario-grande .k-dia-dom { border-top-color: var(--k-domingo); }
+.k-calendario-grande .k-dia-vazio { border-top: 0; background: transparent; }
+.k-calendario-grande .k-nome { font-size: .95rem; }
+@media (max-width: 575.98px) {
+  .k-calendario-grande .k-dia { min-height: 60px; padding: .35rem; border-top-width: 3px; }
+  .k-calendario-grande .k-nome { font-size: .72rem; }
+}
+
+/* ---------- Indisponibilidade e rodapé do menu ---------- */
+.k-ponto-indisp { background: var(--k-indisp); }
+.k-indisp { display: inline-block; margin-top: .25rem; background: var(--k-indisp); color: #fff; font-size: .7rem; font-weight: 500; border-radius: .4rem; padding: .1rem .45rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-usuario { border-top: 1px solid rgba(255,255,255,.1); }
+
+/* ---------- Estrutura comum das páginas internas ---------- */
+.k-coluna-conteudo { min-width: 0; }
+.k-lateral { flex-shrink: 0; max-width: 85vw; }
+.k-lateral form .nav-link { background: none; border: 0; }
+.k-dia .k-nome { display: block; font-size: .85rem; overflow-wrap: anywhere; }
+
+/* ---------- Cartões, campos e botões ---------- */
+.k-card { background: var(--k-celula); border-radius: 1rem; padding: 1.25rem 1.5rem; }
+.k-card-titulo { font-size: 1rem; font-weight: 600; margin-bottom: .75rem; }
+.k-divisor { border-color: rgba(255,255,255,.15); opacity: 1; margin: 1.25rem 0 1rem; }
+.k-linha + .k-linha { border-top: 1px solid rgba(255,255,255,.1); }
+.k-lida { opacity: .6; }
+
+.k-campo { background: var(--k-fundo); border: 1px solid rgba(255,255,255,.18); color: #fff; border-radius: .6rem; color-scheme: dark; }
+.k-campo:focus { background: var(--k-fundo); color: #fff; border-color: #8f8ff0; box-shadow: 0 0 0 .2rem rgba(143,143,240,.35); }
+.k-campo:disabled { opacity: .6; }
+.form-text { color: var(--k-texto-suave); }
+
+.k-btn-acao { background: var(--k-botao); color: #fff; border: 0; border-radius: .6rem; font-weight: 500; }
+.k-btn-acao:hover, .k-btn-acao:focus { background: #7b7bee; color: #fff; }
+.k-btn-acao:disabled { background: var(--k-botao); opacity: .5; }
+.k-btn-contorno { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.35); border-radius: .6rem; }
+.k-btn-contorno:hover, .k-btn-contorno:focus { background: rgba(255,255,255,.1); color: #fff; }
+.k-btn-perigo { background: transparent; color: #ff8fa3; border: 1px solid #c2415a; border-radius: .6rem; }
+.k-btn-perigo:hover, .k-btn-perigo:focus { background: #c2415a; color: #fff; }
+
+/* ---------- Tabela ---------- */
+.k-tabela { --bs-table-bg: transparent; --bs-table-border-color: rgba(255,255,255,.12); }
+.k-tabela th { color: var(--k-texto-suave); font-weight: 500; font-size: .85rem; }
+
+/* ---------- Selos de status e perfil ---------- */
+.k-badge { display: inline-block; font-size: .75rem; font-weight: 600; border-radius: 1rem; padding: .15rem .6rem; margin-left: .35rem; }
+td .k-badge { margin-left: 0; }
+.k-badge-admin { background: #e6e6ee; color: #1f1f3b; }
+.k-badge-lider { background: #6b6be0; color: #fff; }
+.k-badge-voluntario { background: #2f5fa8; color: #fff; }
+.k-badge-ok { background: #2e6b4a; color: #fff; }
+.k-badge-aviso { background: #8a6d12; color: #fff; }
+.k-badge-erro { background: #9c2f46; color: #fff; }
+.k-badge-info { background: #4a4a98; color: #fff; }
+.k-badge-neutro { background: #4b4b6b; color: #fff; }
+
+/* ---------- Janela (modal) ---------- */
+.k-modal { --bs-modal-bg: var(--k-lateral); background: var(--k-lateral); border: 1px solid rgba(255,255,255,.12); border-radius: 1rem; }
