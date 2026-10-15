@@ -1,70 +1,91 @@
 <?php
-session_start();
+// src/login.php
+// Login por e-mail e senha. A página confere a senha por conta própria
+// (não precisa mais do processa_login.php).
 
-// Captura mensagens enviadas via URL (ex: login.php?status=erro)
-$mensagem = '';
-$tipoAlerta = 'info';
+require __DIR__ . '/includes/sessao.php';
+require __DIR__ . '/includes/util.php';
 
-if (isset($_GET['status'])) {
-    switch ($_GET['status']) {
-        case 'erro':
-            $mensagem = 'Usuário ou senha inválidos. Tente novamente.';
-            $tipoAlerta = 'danger';
-            break;
-        case 'sucesso':
-            $mensagem = 'Conta criada com sucesso! Faça seu login.';
-            $tipoAlerta = 'success';
-            break;
-        case 'logout':
-            $mensagem = 'Você saiu do sistema com segurança.';
-            $tipoAlerta = 'warning';
-            break;
-    }
+// Quem já está logado não precisa ver o login
+if (usuarioAtual() !== null) {
+    redirecionar('/minhas_escalas.php');
 }
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrfVerificar();
+
+    $email = mb_strtolower(post('email'));
+    $senha = is_string($_POST['senha'] ?? null) ? $_POST['senha'] : '';
+    $ok    = false;
+    $u     = null;
+
+    // Limite de tamanho evita que alguém mande uma senha gigante só para travar o servidor
+    if ($email !== '' && $senha !== '' && strlen($senha) <= 200) {
+        $s = $pdo->prepare('SELECT id, senha_hash FROM usuarios WHERE email = ? AND ativo = 1');
+        $s->execute([$email]);
+        $u = $s->fetch() ?: null;
+
+        // Se o e-mail não existe, confere contra um hash qualquer: assim a resposta
+        // demora o mesmo tempo e ninguém descobre quais e-mails têm conta.
+        $hash = $u ? $u['senha_hash'] : password_hash('tempo-igual', PASSWORD_DEFAULT);
+        $ok   = password_verify($senha, $hash) && $u !== null;
+    }
+
+    if ($ok) {
+        // Atualiza o hash se o PHP passar a usar um algoritmo/custo mais forte
+        if (password_needs_rehash($u['senha_hash'], PASSWORD_DEFAULT)) {
+            $pdo->prepare('UPDATE usuarios SET senha_hash = ? WHERE id = ?')
+                ->execute([password_hash($senha, PASSWORD_DEFAULT), $u['id']]);
+        }
+
+        loginIniciar($u);   // troca o ID da sessão e cria um novo token CSRF
+        auditar($pdo, (int) $u['id'], 'LOGIN', 'usuarios', (int) $u['id']);
+        redirecionar('/minhas_escalas.php');
+    }
+
+    // Mesma mensagem para e-mail inexistente, senha errada ou conta desativada
+    flash('danger', 'E-mail ou senha inválidos.');
+}
+
+$tituloPagina = 'Entrar';
+include __DIR__ . '/includes/topo.php';
 ?>
-<!DOCTYPE html>
-<html lang="pt-br">
-<head>
-    
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Meu Sistema</title>
-    <!-- Bootstrap 5 CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    
 
-</head>
-<body class="d-flex align-items-center vh-100">
+<div class="row justify-content-center">
+    <div class="col-md-6 col-lg-4">
+        <div class="card shadow-sm">
+            <div class="card-body p-4">
+                <h1 class="h4 text-center mb-4">Entrar</h1>
 
-    <div class="container">
-        <div class="row justify-content-center">
-            <div class="col-md-4">
-                <div class="card shadow p-4 rounded-3">
-                    <h4 class="text-center mb-4">Tela de login de teste</h4>
-                    <?php if (!empty($mensagem)): ?>
-                        <div class="alert alert-<?= $tipoAlerta ?> alert-dismissible fade show" role="alert">
-                            <?= htmlspecialchars($mensagem) ?>
-                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                        </div>
-                    <?php endif; ?>
+                <form method="POST" autocomplete="on">
+                    <?= csrfCampo() ?>
 
-                    <form action="processa_login.php" method="POST">
-                        <div class="mb-3">
-                            <label for="email" class="form-label">E-mail</label>
-                            <input type="email" class="form-control" id="email" name="email" required placeholder="seu@email.com">
+                    <div class="mb-3">
+                        <label for="email" class="form-label">E-mail</label>
+                        <input type="email" class="form-control" id="email" name="email"
+                               required autofocus autocomplete="username"
+                               placeholder="seu@email.com" value="<?= antigo('email') ?>">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="senha" class="form-label">Senha</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="senha" name="senha"
+                                   required autocomplete="current-password">
+                            <button type="button" class="btn btn-outline-secondary"
+                                    data-mostrar-senha="#senha">Mostrar</button>
                         </div>
-                        <div class="mb-3">
-                            <label for="senha" class="form-label">Senha</label>
-                            <input type="password" class="form-control" id="senha" name="senha" required placeholder="******">
-                        </div>
-                        <button type="submit" class="btn btn-primary w-100">Entrar</button>
-                    </form>
-                </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100" data-enviando="Entrando...">Entrar</button>
+                </form>
+
+                <p class="text-center mt-3 mb-0">
+                    <a href="/recuperar_senha.php">Esqueci minha senha</a>
+                </p>
             </div>
         </div>
     </div>
+</div>
 
-    <!-- Bootstrap 5 JS (necessário para fechar o alerta no botão "x") -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+<?php include __DIR__ . '/includes/rodape.php'; ?>
