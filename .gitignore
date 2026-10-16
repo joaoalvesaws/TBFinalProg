@@ -1,4 +1,4 @@
 # Dados sensíveis: nunca versionar
-src/config/config.php
+config/config.php
 *.log
 .DS_Store
