@@ -340,7 +340,6 @@ function iaChamarGemini(array $cfg, string $instrucoes, string $textoUsuario, ar
         'systemInstruction' => ['parts' => [['text' => $instrucoes]]],
         'contents'          => [['role' => 'user', 'parts' => [['text' => $textoUsuario]]]],
         'generationConfig'  => [
-            'temperature'      => 0.2,
             'responseMimeType' => 'application/json',
             'responseSchema'   => $esquema,
         ],
