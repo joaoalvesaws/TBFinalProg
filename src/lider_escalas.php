@@ -1,18 +1,22 @@
 <?php
-// Tela do líder: monta a escala de UM departamento para UM evento.
+// Tela do líder: monta a escala de UM departamento.
 //
-// Fluxo: escolhe o departamento, escolhe o evento, adiciona pessoas
+// Fluxo manual: escolhe o departamento, escolhe o evento, adiciona pessoas
 // (cada uma validada pelo regras.php), remove se precisar e publica.
 //
+// Fluxo com IA: define as VAGAS dos eventos, pede o rascunho de um período,
+// revisa/ajusta e publica. A IA só sugere; o regras.php confere tudo.
+//
 // Depende de:
-//   includes/sessao.php     (login, perfil, CSRF)
-//   regras.php              (função violacoes)
-//   includes/auditoria.php  (função registrarAuditoria)
+//   includes/sessao.php, includes/util.php (login, CSRF, mensagens, auditoria)
+//   regras.php          (função violacoes)
+//   gerador_ia.php      (geração do rascunho com IA)
 //   includes/topo.php e includes/rodape.php (layout)
 
-require __DIR__ . '/includes/sessao.php';
-require __DIR__ . '/regras.php';
-
+require_once __DIR__ . '/includes/sessao.php';
+require_once __DIR__ . '/includes/util.php';
+require_once __DIR__ . '/regras.php';
+require_once __DIR__ . '/gerador_ia.php';
 
 $usuario = exigirPerfil('LIDER');
 
@@ -25,13 +29,17 @@ function dataBR(string $data): string
     return date('d/m/Y', strtotime($data));
 }
 
-// Guarda uma mensagem, recarrega a página e para o script.
+// Guarda as mensagens, recarrega a página e para o script.
 // (Evita reenviar o formulário se o usuário apertar F5.)
+// $tipo: 'sucesso', 'aviso' ou 'erro'
 function voltar(int $depId, int $eventoId, string $tipo, array $mensagens): void
 {
-    $_SESSION['flash'] = ['tipo' => $tipo, 'mensagens' => $mensagens];
+    $classe = ['sucesso' => 'success', 'aviso' => 'warning'][$tipo] ?? 'danger';
+    foreach ($mensagens as $mensagem) {
+        flash($classe, $mensagem);
+    }
 
-    $url = 'lider_escala.php';
+    $url = 'lider_escalas.php';
     if ($depId) {
         $url .= '?dep=' . $depId . ($eventoId ? '&evento=' . $eventoId : '');
     }
@@ -41,7 +49,7 @@ function voltar(int $depId, int $eventoId, string $tipo, array $mensagens): void
 
 // ---------------------------------------------------------------
 // 1) Departamentos que este usuário pode gerenciar
-//    Líder: só os que ele lidera. Admin da igreja: os da igreja dele. (tomando por exemplo uma igreja)
+//    Líder: só os que ele lidera. Admin da igreja: os da igreja dele.
 //    Admin geral: todos.
 // ---------------------------------------------------------------
 $sqlBase = 'SELECT d.id, d.nome, d.igreja_id, i.nome AS igreja_nome
@@ -99,12 +107,75 @@ if ($dep && $eventoId) {
 }
 
 // ---------------------------------------------------------------
-// 3) Ações (POST): adicionar, remover, publicar
+// 3) Ações (POST)
 // ---------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrfVerificar();
+    $acao = post('acao');
 
-    if ($dep === null || $evento === null) {
+    if ($dep === null) {
+        voltar($depId, 0, 'erro', ['Escolha um departamento.']);
+    }
+
+    // ===== Ações que NÃO precisam de um evento escolhido =====
+
+    // ----- Gerar rascunho com IA (um período inteiro) -----
+    if ($acao === 'gerar_ia') {
+        $resultado = gerarRascunhoComIA(
+            $pdo, $usuario, $dep,
+            post('data_inicio'), post('data_fim'), post('pedido')
+        );
+
+        if (!$resultado['ok']) {
+            voltar($depId, 0, 'erro', [$resultado['erro']]);
+        }
+
+        $_SESSION['ia_resultado'] = $resultado;   // exibido uma vez na tela
+
+        $mensagens = [];
+        if (!empty($resultado['aviso'])) {
+            $mensagens[] = $resultado['aviso'];
+        }
+        if ($resultado['criadas'] > 0 || empty($resultado['aviso'])) {
+            $mensagens[] = 'A IA sugeriu ' . $resultado['criadas']
+                         . ' pessoa(s) como RASCUNHO. Revise antes de publicar.';
+        }
+        $tipo = ($resultado['nao_resolvidos'] || !empty($resultado['aviso'])) ? 'aviso' : 'sucesso';
+        voltar($depId, 0, $tipo, $mensagens);
+    }
+
+    // ----- Publicar todos os rascunhos de um período -----
+    if ($acao === 'publicar_periodo') {
+        $inicio = post('data_inicio');
+        $fim    = post('data_fim');
+
+        if (!dataValida($inicio) || !dataValida($fim) || $fim < $inicio) {
+            voltar($depId, 0, 'erro', ['Informe um período válido para publicar.']);
+        }
+
+        $stmt = $pdo->prepare(
+            "UPDATE escalas es
+               JOIN eventos ev ON ev.id = es.evento_id
+                SET es.status = 'ENVIADA'
+              WHERE es.departamento_id = ? AND es.status = 'RASCUNHO'
+                AND ev.data BETWEEN ? AND ? AND ev.data >= CURDATE()"
+        );
+        $stmt->execute([$depId, $inicio, $fim]);
+        $total = $stmt->rowCount();
+
+        if ($total === 0) {
+            voltar($depId, 0, 'erro', ['Não há rascunhos neste período para publicar.']);
+        }
+
+        registrarAuditoria($pdo, (int) $usuario['id'], 'ESCALA_PUBLICADA_PERIODO', 'departamentos', $depId, [
+            'periodo'    => [$inicio, $fim],
+            'quantidade' => $total,
+        ]);
+        voltar($depId, 0, 'sucesso', ["Escala publicada ($total pessoa(s))."]);
+    }
+
+    // ===== Ações que precisam de um evento futuro =====
+    if ($evento === null) {
         voltar($depId, 0, 'erro', ['Escolha um departamento e um evento.']);
     }
 
@@ -112,7 +183,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         voltar($depId, $eventoId, 'erro', ['Este evento já passou e não pode mais ser alterado.']);
     }
 
-    $acao = $_POST['acao'] ?? '';
+    // ----- Definir uma vaga (função + quantidade) -----
+    if ($acao === 'vaga_adicionar') {
+        $funcaoVaga = mb_substr(post('funcao_vaga'), 0, 80);
+        $quantidade = (int) post('quantidade');
+
+        if ($quantidade < 1 || $quantidade > 20) {
+            voltar($depId, $eventoId, 'erro', ['A quantidade de vagas deve ser de 1 a 20.']);
+        }
+
+        // Se a vaga já existe para essa função, só atualiza a quantidade
+        $pdo->prepare(
+            'INSERT INTO vagas (evento_id, departamento_id, funcao, quantidade)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE quantidade = VALUES(quantidade)'
+        )->execute([$eventoId, $depId, $funcaoVaga, $quantidade]);
+
+        registrarAuditoria($pdo, (int) $usuario['id'], 'VAGA_DEFINIDA', 'eventos', $eventoId, [
+            'departamento_id' => $depId,
+            'funcao'          => $funcaoVaga,
+            'quantidade'      => $quantidade,
+        ]);
+        voltar($depId, $eventoId, 'sucesso', ['Vaga salva.']);
+    }
+
+    // ----- Remover uma vaga -----
+    if ($acao === 'vaga_remover') {
+        $vagaId = (int) post('vaga_id');
+        $stmt = $pdo->prepare('DELETE FROM vagas WHERE id = ? AND evento_id = ? AND departamento_id = ?');
+        $stmt->execute([$vagaId, $eventoId, $depId]);
+
+        if ($stmt->rowCount() > 0) {
+            registrarAuditoria($pdo, (int) $usuario['id'], 'VAGA_REMOVIDA', 'eventos', $eventoId, [
+                'departamento_id' => $depId,
+                'vaga_id'         => $vagaId,
+            ]);
+        }
+        voltar($depId, $eventoId, 'sucesso', ['Vaga removida.']);
+    }
+
+    // ----- Copiar as vagas deste evento para os próximos eventos de mesmo nome -----
+    if ($acao === 'vagas_copiar') {
+        $pdo->prepare(
+            'INSERT INTO vagas (evento_id, departamento_id, funcao, quantidade)
+             SELECT ev2.id, v.departamento_id, v.funcao, v.quantidade
+               FROM vagas v
+               JOIN eventos ev2 ON ev2.igreja_id = ? AND ev2.nome = ?
+                                AND ev2.data >= CURDATE() AND ev2.id <> ?
+              WHERE v.evento_id = ? AND v.departamento_id = ?
+             ON DUPLICATE KEY UPDATE quantidade = VALUES(quantidade)'
+        )->execute([$dep['igreja_id'], $evento['nome'], $eventoId, $eventoId, $depId]);
+
+        registrarAuditoria($pdo, (int) $usuario['id'], 'VAGAS_COPIADAS', 'eventos', $eventoId, [
+            'departamento_id' => $depId,
+            'nome_evento'     => $evento['nome'],
+        ]);
+        voltar($depId, $eventoId, 'sucesso', ['Vagas copiadas para os próximos eventos "' . $evento['nome'] . '".']);
+    }
 
     // ----- Adicionar uma pessoa à escala -----
     if ($acao === 'adicionar') {
@@ -258,26 +385,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // ---------------------------------------------------------------
 // 4) Dados para mostrar na tela
 // ---------------------------------------------------------------
-$flash = $_SESSION['flash'] ?? null;
-unset($_SESSION['flash']);
+$iaResultado = $_SESSION['ia_resultado'] ?? null;
+unset($_SESSION['ia_resultado']);
 
 $eventos = [];
 $escalados = [];
 $disponiveis = [];
+$vagasEvento = [];
+$faltamPorVaga = [];
+$funcoesDoDep = [];
 
 if ($dep) {
-    // Próximos eventos da igreja, com quantas pessoas deste departamento já estão escaladas
+    // Próximos eventos da igreja: quantas pessoas deste departamento já estão
+    // escaladas e quantas vagas foram definidas
     $stmt = $pdo->prepare(
         'SELECT ev.id, ev.nome, ev.data, ev.hora_inicio, ev.hora_fim,
                 (SELECT COUNT(*) FROM escalas es
-                  WHERE es.evento_id = ev.id AND es.departamento_id = ?) AS total
+                  WHERE es.evento_id = ev.id AND es.departamento_id = ?) AS total,
+                (SELECT COALESCE(SUM(v.quantidade), 0) FROM vagas v
+                  WHERE v.evento_id = ev.id AND v.departamento_id = ?) AS vagas
            FROM eventos ev
           WHERE ev.igreja_id = ? AND ev.data >= CURDATE()
           ORDER BY ev.data, ev.hora_inicio
           LIMIT 60'
     );
-    $stmt->execute([$depId, $dep['igreja_id']]);
+    $stmt->execute([$depId, $depId, $dep['igreja_id']]);
     $eventos = $stmt->fetchAll();
+
+    // Funções já usadas no departamento (sugestão no formulário de vagas)
+    $stmt = $pdo->prepare(
+        "SELECT DISTINCT funcao FROM departamento_usuario
+          WHERE departamento_id = ? AND funcao IS NOT NULL AND funcao <> ''
+          ORDER BY funcao"
+    );
+    $stmt->execute([$depId]);
+    $funcoesDoDep = $stmt->fetchAll(PDO::FETCH_COLUMN);
 }
 
 if ($dep && $evento) {
@@ -305,6 +447,19 @@ if ($dep && $evento) {
     );
     $stmt->execute([$depId, $eventoId]);
     $disponiveis = $stmt->fetchAll();
+
+    // Vagas definidas para este evento e quantas ainda faltam
+    $stmt = $pdo->prepare(
+        "SELECT id, funcao, quantidade FROM vagas
+          WHERE evento_id = ? AND departamento_id = ?
+          ORDER BY (funcao = ''), funcao"
+    );
+    $stmt->execute([$eventoId, $depId]);
+    $vagasEvento = $stmt->fetchAll();
+
+    foreach (iaPendencias($pdo, $depId, [$eventoId]) as $p) {
+        $faltamPorVaga[$p['vaga_id']] = $p['faltam'];
+    }
 }
 
 $temRascunho = false;
@@ -320,19 +475,15 @@ $classeStatus = [
     'ACEITA'   => 'success',
 ];
 
-$titulo = 'Montar escala';
+// Datas sugeridas nos formulários de período
+$periodoInicio = $iaResultado['inicio'] ?? date('Y-m-d');
+$periodoFim    = $iaResultado['fim'] ?? date('Y-m-d', strtotime('+30 days'));
+
+$tituloPagina = 'Montar escala';
 include __DIR__ . '/includes/topo.php';
 ?>
 
 <h1 class="h3 mb-3">Montar escala</h1>
-
-<?php if ($flash): ?>
-    <div class="alert alert-<?= $flash['tipo'] === 'sucesso' ? 'success' : 'danger' ?>">
-        <?php foreach ($flash['mensagens'] as $mensagem): ?>
-            <div><?= e($mensagem) ?></div>
-        <?php endforeach; ?>
-    </div>
-<?php endif; ?>
 
 <?php if (!$departamentos): ?>
 
@@ -360,6 +511,128 @@ include __DIR__ . '/includes/topo.php';
     </form>
 
     <?php if ($dep): ?>
+
+        <!-- ===================== IA ===================== -->
+        <div class="card mb-4 border-primary">
+            <div class="card-body">
+                <h2 class="h5">Gerar rascunho com IA</h2>
+                <p class="small text-muted mb-3">
+                    1) Defina as vagas de cada evento (ao escolher um evento, mais abaixo).
+                    2) Escolha o período e peça o rascunho. 3) Revise, ajuste e publique.
+                    A IA só sugere: as regras (bloqueios, dias seguidos, conflito de horário)
+                    são conferidas pelo sistema antes de qualquer gravação.
+                </p>
+
+                <?php if (!iaConfigurada()): ?>
+                    <div class="alert alert-warning mb-0">
+                        A IA ainda não foi configurada. Falta a chave no arquivo de configuração do sistema.
+                    </div>
+                <?php else: ?>
+                    <form method="POST" data-intervalo-datas class="row g-2">
+                        <?= csrfCampo() ?>
+                        <input type="hidden" name="acao" value="gerar_ia">
+                        <input type="hidden" name="dep" value="<?= $depId ?>">
+
+                        <div class="col-6 col-md-3">
+                            <label class="form-label" for="ia_inicio">De</label>
+                            <input type="date" class="form-control" id="ia_inicio" name="data_inicio"
+                                   value="<?= e($periodoInicio) ?>" required>
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label" for="ia_fim">Até</label>
+                            <input type="date" class="form-control" id="ia_fim" name="data_fim"
+                                   value="<?= e($periodoFim) ?>" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label" for="ia_pedido">
+                                Pedido para a IA (opcional)
+                            </label>
+                            <textarea class="form-control" id="ia_pedido" name="pedido" rows="2" maxlength="500"
+                                      placeholder="Ex.: evite repetir quem serviu no último mês; procure alternar os cultos de domingo."></textarea>
+                            <div class="form-text">
+                                Não escreva nomes nem dados pessoais: a IA recebe só códigos das pessoas.
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-primary"
+                                    data-enviando="A IA está montando o rascunho... pode levar até 1 minuto"
+                                    data-confirma="Enviar os dados do período (sem nomes) para a IA e gerar o rascunho?">
+                                Gerar rascunho com IA
+                            </button>
+                        </div>
+                    </form>
+                <?php endif; ?>
+
+                <hr>
+
+                <form method="POST" data-intervalo-datas class="row g-2 align-items-end">
+                    <?= csrfCampo() ?>
+                    <input type="hidden" name="acao" value="publicar_periodo">
+                    <input type="hidden" name="dep" value="<?= $depId ?>">
+                    <div class="col-6 col-md-3">
+                        <label class="form-label" for="pub_inicio">Publicar rascunhos de</label>
+                        <input type="date" class="form-control" id="pub_inicio" name="data_inicio"
+                               value="<?= e($periodoInicio) ?>" required>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label" for="pub_fim">até</label>
+                        <input type="date" class="form-control" id="pub_fim" name="data_fim"
+                               value="<?= e($periodoFim) ?>" required>
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-success"
+                                data-confirma="Publicar para os voluntários TODOS os rascunhos deste período?">
+                            Publicar período
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <?php if ($iaResultado): ?>
+            <div class="card mb-4">
+                <div class="card-body">
+                    <h2 class="h5">Resultado da IA</h2>
+                    <p class="mb-2">
+                        <?= (int) $iaResultado['criadas'] ?> pessoa(s) sugerida(s) como rascunho
+                        em <?= (int) $iaResultado['rodadas'] ?> rodada(s).
+                        <?php if (!empty($iaResultado['modelo'])): ?>
+                            <span class="text-muted small">Modelo: <?= e($iaResultado['modelo']) ?></span>
+                        <?php endif; ?>
+                    </p>
+
+                    <?php if (!empty($iaResultado['observacoes'])): ?>
+                        <p class="text-muted"><?= e($iaResultado['observacoes']) ?></p>
+                    <?php endif; ?>
+
+                    <?php if (!empty($iaResultado['nao_resolvidos'])): ?>
+                        <h3 class="h6">Vagas que ficaram sem ninguém (preencha à mão)</h3>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead>
+                                    <tr><th>Evento</th><th>Função</th><th>Faltam</th><th>Motivo</th></tr>
+                                </thead>
+                                <tbody>
+                                <?php foreach ($iaResultado['nao_resolvidos'] as $nr): ?>
+                                    <tr>
+                                        <td>
+                                            <a href="lider_escalas.php?dep=<?= $depId ?>&evento=<?= (int) $nr['evento_id'] ?>">
+                                                <?= e($nr['evento']) ?>, <?= e(dataBR($nr['data'])) ?>
+                                            </a>
+                                        </td>
+                                        <td><?= e($nr['funcao'] !== '' ? $nr['funcao'] : 'Qualquer') ?></td>
+                                        <td><?= (int) $nr['faltam'] ?></td>
+                                        <td><?= e($nr['motivo']) ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        <?php endif; ?>
+
         <div class="row g-4">
 
             <!-- Coluna 1: eventos -->
@@ -372,10 +645,13 @@ include __DIR__ . '/includes/topo.php';
                     <div class="list-group">
                         <?php foreach ($eventos as $ev): ?>
                             <a class="list-group-item list-group-item-action <?= $evento && (int) $ev['id'] === $eventoId ? 'active' : '' ?>"
-                               href="lider_escala.php?dep=<?= $depId ?>&evento=<?= (int) $ev['id'] ?>">
+                               href="lider_escalas.php?dep=<?= $depId ?>&evento=<?= (int) $ev['id'] ?>">
                                 <div class="d-flex justify-content-between">
                                     <strong><?= e($ev['nome']) ?></strong>
-                                    <span class="badge bg-light text-dark"><?= (int) $ev['total'] ?></span>
+                                    <span class="badge bg-light text-dark"
+                                          title="escalados / vagas definidas">
+                                        <?= (int) $ev['total'] ?><?= (int) $ev['vagas'] > 0 ? ' / ' . (int) $ev['vagas'] : '' ?>
+                                    </span>
                                 </div>
                                 <small>
                                     <?= e(dataBR($ev['data'])) ?>,
@@ -391,7 +667,7 @@ include __DIR__ . '/includes/topo.php';
             <!-- Coluna 2: escala do evento escolhido -->
             <div class="col-12 col-lg-8">
                 <?php if (!$evento): ?>
-                    <p class="text-muted">Escolha um evento ao lado para montar a escala.</p>
+                    <p class="text-muted">Escolha um evento ao lado para definir as vagas e montar a escala.</p>
                 <?php else: ?>
                     <h2 class="h5">
                         <?= e($evento['nome']) ?>
@@ -401,7 +677,80 @@ include __DIR__ . '/includes/topo.php';
                         </small>
                     </h2>
 
+                    <!-- Vagas (usadas pela IA) -->
+                    <h3 class="h6 mt-3">Vagas deste evento</h3>
+                    <?php if (!$vagasEvento): ?>
+                        <p class="text-muted small">
+                            Nenhuma vaga definida. Sem vagas, a IA não sabe o que preencher neste evento.
+                        </p>
+                    <?php else: ?>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle">
+                                <thead>
+                                    <tr><th>Função</th><th>Vagas</th><th>Faltam</th><th></th></tr>
+                                </thead>
+                                <tbody>
+                                <?php foreach ($vagasEvento as $v): ?>
+                                    <tr>
+                                        <td><?= e($v['funcao'] !== '' ? $v['funcao'] : 'Qualquer função') ?></td>
+                                        <td><?= (int) $v['quantidade'] ?></td>
+                                        <td><?= (int) ($faltamPorVaga[(int) $v['id']] ?? 0) ?></td>
+                                        <td class="text-end">
+                                            <form method="POST" class="d-inline">
+                                                <?= csrfCampo() ?>
+                                                <input type="hidden" name="acao" value="vaga_remover">
+                                                <input type="hidden" name="dep" value="<?= $depId ?>">
+                                                <input type="hidden" name="evento" value="<?= $eventoId ?>">
+                                                <input type="hidden" name="vaga_id" value="<?= (int) $v['id'] ?>">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger"
+                                                        data-confirma="Remover esta vaga?">Remover</button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php endif; ?>
+
+                    <form method="POST" class="row g-2 mb-2">
+                        <?= csrfCampo() ?>
+                        <input type="hidden" name="acao" value="vaga_adicionar">
+                        <input type="hidden" name="dep" value="<?= $depId ?>">
+                        <input type="hidden" name="evento" value="<?= $eventoId ?>">
+                        <div class="col-12 col-md-5">
+                            <input type="text" name="funcao_vaga" class="form-control" maxlength="80"
+                                   list="funcoes-dep" placeholder="Função (vazio = qualquer)">
+                            <datalist id="funcoes-dep">
+                                <?php foreach ($funcoesDoDep as $f): ?>
+                                    <option value="<?= e($f) ?>">
+                                <?php endforeach; ?>
+                            </datalist>
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <input type="number" name="quantidade" class="form-control"
+                                   min="1" max="20" value="1" required>
+                        </div>
+                        <div class="col-auto">
+                            <button type="submit" class="btn btn-outline-primary">Definir vaga</button>
+                        </div>
+                    </form>
+
+                    <?php if ($vagasEvento): ?>
+                        <form method="POST" class="mb-3">
+                            <?= csrfCampo() ?>
+                            <input type="hidden" name="acao" value="vagas_copiar">
+                            <input type="hidden" name="dep" value="<?= $depId ?>">
+                            <input type="hidden" name="evento" value="<?= $eventoId ?>">
+                            <button type="submit" class="btn btn-sm btn-link p-0"
+                                    data-confirma="Copiar estas vagas para os próximos eventos com o mesmo nome?">
+                                Copiar estas vagas para os próximos eventos "<?= e($evento['nome']) ?>"
+                            </button>
+                        </form>
+                    <?php endif; ?>
+
                     <!-- Quem já está escalado -->
+                    <h3 class="h6 mt-4">Escalados</h3>
                     <?php if (!$escalados): ?>
                         <p class="text-muted">Ninguém escalado ainda.</p>
                     <?php else: ?>
@@ -471,7 +820,7 @@ include __DIR__ . '/includes/topo.php';
                         </form>
                     <?php endif; ?>
 
-                    <!-- Publicar -->
+                    <!-- Publicar este evento -->
                     <?php if ($temRascunho): ?>
                         <form method="POST" class="mt-4">
                             <?= csrfCampo() ?>
