@@ -10,7 +10,7 @@
 //   includes/topo.php e includes/rodape.php (layout)
 
 require __DIR__ . '/includes/sessao.php';
-
+require_once __DIR__ . '/includes/auditoria.php';
 
 $usuario = exigirLogin();
 

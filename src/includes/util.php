@@ -5,6 +5,7 @@
 //     require __DIR__ . '/includes/sessao.php';
 //     require __DIR__ . '/includes/util.php';
 
+require_once __DIR__ . '/auditoria.php';
 require_once __DIR__ . '/../notificar.php';
 
 
