@@ -345,22 +345,36 @@ function iaChamarGemini(array $cfg, string $instrucoes, string $textoUsuario, ar
         ],
     ];
 
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_POST           => true,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_CONNECTTIMEOUT => 10,
-        CURLOPT_TIMEOUT        => $cfg['timeout'],
-        CURLOPT_HTTPHEADER     => [
-            'Content-Type: application/json',
-            'x-goog-api-key: ' . $cfg['chave'],
-        ],
-        CURLOPT_POSTFIELDS     => json_encode($corpo, JSON_UNESCAPED_UNICODE),
-    ]);
-    $resposta = curl_exec($ch);
-    $http     = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $erroCurl = curl_error($ch);
-    curl_close($ch);
+    $payload    = json_encode($corpo, JSON_UNESCAPED_UNICODE);
+    $tentativas = 3;
+
+    for ($t = 1; $t <= $tentativas; $t++) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT        => $cfg['timeout'],
+            CURLOPT_HTTPHEADER     => [
+                'Content-Type: application/json',
+                'x-goog-api-key: ' . $cfg['chave'],
+            ],
+            CURLOPT_POSTFIELDS     => $payload,
+        ]);
+        $resposta = curl_exec($ch);
+        $http     = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $erroCurl = curl_error($ch);
+        curl_close($ch);
+
+        // 500, 502, 503 e 504: problema temporário do lado do Google.
+        // Espera um pouco e tenta de novo (essas respostas voltam rápido).
+        if ($resposta !== false && in_array($http, [500, 502, 503, 504], true) && $t < $tentativas) {
+            error_log("IA: HTTP $http, tentativa $t de $tentativas");
+            sleep(2 * $t);
+            continue;
+        }
+        break;
+    }
 
     if ($resposta === false) {
         error_log('IA: falha de conexão: ' . $erroCurl);
@@ -373,6 +387,10 @@ function iaChamarGemini(array $cfg, string $instrucoes, string $textoUsuario, ar
     if ($http === 404) {
         error_log('IA: modelo não encontrado: ' . $cfg['modelo'] . ' | ' . substr($resposta, 0, 300));
         throw new RuntimeException('O modelo de IA "' . $cfg['modelo'] . '" não foi encontrado. Troque o nome em config.php > ia > modelo por um que apareça no Google AI Studio.');
+    }
+    if (in_array($http, [500, 502, 503, 504], true)) {
+        error_log("IA: HTTP $http | " . substr($resposta, 0, 300));
+        throw new RuntimeException('O serviço da IA está sobrecarregado ou indisponível agora. Tente de novo em alguns minutos.');
     }
     if ($http >= 400) {
         error_log("IA: HTTP $http | " . substr($resposta, 0, 500));

@@ -93,6 +93,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($depto && (int) $depto['igreja_id'] !== $igrejaId) {
             $erros[] = 'O departamento não pertence à igreja escolhida.';
         }
+                // O e-mail já tem conta? Então não cria outra: só inclui a pessoa no departamento escolhido.
+        if (!$erros) {
+            $s = $pdo->prepare('SELECT id, nome, igreja_id, perfil, ativo FROM usuarios WHERE email = ?');
+            $s->execute([$email]);
+            $existente = $s->fetch();
+
+            if ($existente) {
+                if (!$depto || (int) $existente['igreja_id'] !== (int) $depto['igreja_id']) {
+                    // Sem departamento ou de outra igreja: não revela nada sobre a conta
+                    $erros[] = 'Já existe uma conta com este e-mail.';
+                } elseif (nivelPerfil($existente['perfil']) >= $meuNivel) {
+                    $erros[] = 'Esta pessoa já tem conta e você não pode alterar o vínculo dela.';
+                } elseif (!$existente['ativo']) {
+                    $erros[] = 'Esta pessoa tem conta, mas ela está desativada. Reative antes de incluí-la em outro departamento.';
+                } else {
+                    $ja = $pdo->prepare(
+                        'SELECT 1 FROM departamento_usuario WHERE departamento_id = ? AND usuario_id = ?'
+                    );
+                    $ja->execute([$depto['id'], $existente['id']]);
+
+                    if ($ja->fetchColumn()) {
+                        $erros[] = $existente['nome'] . ' já faz parte deste departamento.';
+                    } else {
+                        $pdo->prepare(
+                            'INSERT INTO departamento_usuario (departamento_id, usuario_id, funcao, e_lider)
+                             VALUES (?, ?, ?, 0)'
+                        )->execute([$depto['id'], $existente['id'], $funcao === '' ? null : $funcao]);
+
+                        auditar($pdo, (int) $usuario['id'], 'USUARIO_VINCULADO_DEPARTAMENTO', 'usuarios',
+                                (int) $existente['id'], ['departamento_id' => (int) $depto['id']]);
+
+                        flash('success', $existente['nome'] . ' já tinha conta e foi incluído(a) no departamento '
+                            . $depto['nome'] . '. Nenhum convite foi enviado e o perfil não mudou.');
+                        redirecionar('/usuarios.php');
+                        exit;
+                    }
+                }
+            }
+        }
 
         if ($erros) {
             foreach ($erros as $mensagem) {
@@ -180,8 +219,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // ---------------------------------------------------------------
 // Lista de pessoas (cada perfil vê só o seu alcance)
 // ---------------------------------------------------------------
-$colunas = 'u.id, u.nome, u.email, u.perfil, u.ativo, i.nome AS igreja
-              FROM usuarios u LEFT JOIN igrejas i ON i.id = u.igreja_id';
+// Departamentos de cada pessoa (o líder só vê os que ele lidera)
+$filtroLider = $usuario['perfil'] === 'LIDER'
+    ? ' AND d2.id IN (SELECT departamento_id FROM departamento_usuario WHERE usuario_id = '
+      . (int) $usuario['id'] . ' AND e_lider = 1)'
+    : '';
+
+$colunas = "u.id, u.nome, u.email, u.perfil, u.ativo, i.nome AS igreja,
+              (SELECT GROUP_CONCAT(
+                        CONCAT(d2.nome, IF(COALESCE(du2.funcao, '') = '', '', CONCAT(' (', du2.funcao, ')')))
+                        ORDER BY d2.nome SEPARATOR ', ')
+                 FROM departamento_usuario du2
+                 JOIN departamentos d2 ON d2.id = du2.departamento_id
+                WHERE du2.usuario_id = u.id$filtroLider) AS deptos
+              FROM usuarios u LEFT JOIN igrejas i ON i.id = u.igreja_id";
 
 if ($ehGeral) {
     $stmt = $pdo->query("SELECT $colunas ORDER BY u.nome");
@@ -214,8 +265,9 @@ include __DIR__ . '/includes/topo.php';
         <div class="card">
             <div class="card-body">
                 <h2 class="h5">Cadastrar pessoa</h2>
-                <p class="small text-muted">
+                                <p class="small text-muted">
                     A pessoa recebe um e-mail com um link para definir a própria senha.
+                    Se o e-mail já tiver conta, ela só é incluída no departamento escolhido.
                 </p>
 
                 <form method="POST" autocomplete="off">
@@ -310,7 +362,9 @@ include __DIR__ . '/includes/topo.php';
                     <tr>
                         <th>Nome</th>
                         <th>Perfil</th>
+                        <th>Departamentos</th>
                         <?php if ($ehGeral): ?><th>Igreja</th><?php endif; ?>
+                                                    
                         <th>Situação</th>
                         <th></th>
                     </tr>
@@ -323,6 +377,7 @@ include __DIR__ . '/includes/topo.php';
                             <small class="text-muted"><?= e($p['email']) ?></small>
                         </td>
                         <td><?= e(ROTULOS_PERFIL[$p['perfil']] ?? $p['perfil']) ?></td>
+                                                <td><small><?= e($p['deptos'] ?? '') ?: '-' ?></small></td>
                         <?php if ($ehGeral): ?><td><?= e($p['igreja'] ?? '-') ?></td><?php endif; ?>
                         <td>
                             <?php if ($p['ativo']): ?>
@@ -359,7 +414,7 @@ include __DIR__ . '/includes/topo.php';
                     </tr>
                 <?php endforeach; ?>
                 <?php if (!$pessoas): ?>
-                    <tr><td colspan="5" class="text-muted">Nenhuma pessoa cadastrada ainda.</td></tr>
+                    <tr><td colspan="6" class="text-muted">Nenhuma pessoa cadastrada ainda.</td></tr>
                 <?php endif; ?>
                 </tbody>
             </table>

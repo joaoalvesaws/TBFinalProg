@@ -2,7 +2,7 @@
 // Tela do voluntário: mostra onde ele está escalado e permite confirmar presença.
 //
 // O voluntário só vê escalas PUBLICADAS (ENVIADA ou ACEITA).
-// Rascunhos do líder nunca aparecem aqui.
+// Rascunhos do líder nunca aparecem aqui.  
 //
 // Depende de:
 //   includes/sessao.php     (login e CSRF)
