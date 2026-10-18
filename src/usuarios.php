@@ -389,6 +389,8 @@ include __DIR__ . '/includes/topo.php';
                         <td class="text-end text-nowrap">
                             <?php if (nivelPerfil($p['perfil']) < $meuNivel): ?>
                                 <?php if ($p['ativo']): ?>
+                                        <a href="/usuario_editar.php?id=<?= (int) $p['id'] ?>"
+       class="btn btn-sm btn-outline-primary">Editar</a>
                                     <form method="POST" class="d-inline">
                                         <?= csrfCampo() ?>
                                         <input type="hidden" name="acao" value="reenviar">
