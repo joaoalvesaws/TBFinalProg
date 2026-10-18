@@ -7,7 +7,7 @@ require_once __DIR__ . '/sessao.php';
 require_once __DIR__ . '/util.php';
 
 $tituloPagina = $tituloPagina ?? 'Sistema de Escalas';
-$usuarioMenu  = usuarioAtual();   // null se não estiver logado
+$usuarioMenu = function_exists('usuarioAtual') ? usuarioAtual() : null;
 $nivelMenu    = $usuarioMenu ? nivelPerfil($usuarioMenu['perfil']) : 0;
 ?>
 <!DOCTYPE html>
@@ -26,7 +26,11 @@ $nivelMenu    = $usuarioMenu ? nivelPerfil($usuarioMenu['perfil']) : 0;
     <div class="container">
         <a class="navbar-brand" href="/index.php">Escalas</a>
 
-        <?php if ($usuarioMenu): ?>
+        <?php if (in_array($usuarioMenu['perfil'] ?? '', ['ADMIN_IGREJA', 'ADMIN_GERAL'], true)): ?>
+    <li class="nav-item">
+        <a class="nav-link" href="/eventos_padrao.php">Cultos padrão</a>
+    </li>
+    
             <button class="navbar-toggler" type="button"
                     data-bs-toggle="collapse" data-bs-target="#menuPrincipal"
                     aria-controls="menuPrincipal" aria-expanded="false" aria-label="Abrir menu">
