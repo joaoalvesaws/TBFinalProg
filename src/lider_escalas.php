@@ -240,6 +240,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
         voltar($depId, $eventoId, 'sucesso', ['Vagas copiadas para os próximos eventos "' . $evento['nome'] . '".']);
     }
+        // ----- Remover as vagas dos outros eventos futuros de mesmo nome (desfaz o "copiar") -----
+    if ($acao === 'vagas_remover_copias') {
+        $stmt = $pdo->prepare(
+            'DELETE v
+               FROM vagas v
+               JOIN eventos ev2 ON ev2.id = v.evento_id
+              WHERE v.departamento_id = ?
+                AND ev2.igreja_id = ? AND ev2.nome = ?
+                AND ev2.data >= CURDATE() AND ev2.id <> ?'
+        );
+        $stmt->execute([$depId, $dep['igreja_id'], $evento['nome'], $eventoId]);
+        $total = $stmt->rowCount();
+
+        registrarAuditoria($pdo, (int) $usuario['id'], 'VAGAS_COPIAS_REMOVIDAS', 'eventos', $eventoId, [
+            'departamento_id' => $depId,
+            'nome_evento'     => $evento['nome'],
+            'vagas_removidas' => $total,
+        ]);
+
+        if ($total === 0) {
+            voltar($depId, $eventoId, 'erro', ['Não havia vagas nos outros eventos "' . $evento['nome'] . '".']);
+        }
+        voltar($depId, $eventoId, 'sucesso', [$total . ' vaga(s) removida(s) dos outros eventos "' . $evento['nome'] . '".']);
+    }
 
     // ----- Adicionar uma pessoa à escala -----
     if ($acao === 'adicionar') {
@@ -745,6 +769,31 @@ include __DIR__ . '/includes/topo.php';
                             <button type="submit" class="btn btn-sm btn-link p-0"
                                     data-confirma="Copiar estas vagas para os próximos eventos com o mesmo nome?">
                                 Copiar estas vagas para os próximos eventos "<?= e($evento['nome']) ?>"
+                            </button>
+                        </form>
+                    <?php endif; ?>
+                                        <?php
+                    // Quantas vagas existem nos OUTROS eventos futuros de mesmo nome
+                    $stmt = $pdo->prepare(
+                        'SELECT COUNT(*)
+                           FROM vagas v
+                           JOIN eventos ev2 ON ev2.id = v.evento_id
+                          WHERE v.departamento_id = ?
+                            AND ev2.igreja_id = ? AND ev2.nome = ?
+                            AND ev2.data >= CURDATE() AND ev2.id <> ?'
+                    );
+                    $stmt->execute([$depId, $dep['igreja_id'], $evento['nome'], $eventoId]);
+                    $copiasRemoviveis = (int) $stmt->fetchColumn();
+                    ?>
+                    <?php if ($copiasRemoviveis > 0): ?>
+                        <form method="POST" class="mb-3">
+                            <?= csrfCampo() ?>
+                            <input type="hidden" name="acao" value="vagas_remover_copias">
+                            <input type="hidden" name="dep" value="<?= $depId ?>">
+                            <input type="hidden" name="evento" value="<?= $eventoId ?>">
+                            <button type="submit" class="btn btn-sm btn-link text-danger p-0"
+                                    data-confirma="Remover as <?= (int) $copiasRemoviveis ?> vaga(s) dos outros eventos futuros chamados <?= e($evento['nome']) ?>? As vagas deste evento continuam.">
+                                Remover as vagas dos outros eventos "<?= e($evento['nome']) ?>" (<?= (int) $copiasRemoviveis ?>)
                             </button>
                         </form>
                     <?php endif; ?>
