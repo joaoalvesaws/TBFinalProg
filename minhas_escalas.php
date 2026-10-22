@@ -1,18 +1,13 @@
 <?php
-// Tela do voluntário: mostra onde ele está escalado e permite confirmar presença.
-//
-// O voluntário só vê escalas PUBLICADAS (ENVIADA ou ACEITA).
-// Rascunhos do líder nunca aparecem aqui.  
-//
-// Depende de:
-//   includes/sessao.php     (login e CSRF)
-//   includes/auditoria.php  (função registrarAuditoria)
-//   includes/topo.php e includes/rodape.php (layout)
+// Tela do voluntário + Visão Geral com Responsáveis e Funções para Administradores.
 
 require __DIR__ . '/includes/sessao.php';
 require_once __DIR__ . '/includes/auditoria.php';
 
 $usuario = exigirLogin();
+
+// Verifica perfil administrativo
+$ehAdmin = in_array($usuario['perfil'] ?? '', ['ADMIN_GERAL', 'ADMIN_IGREJA'], true);
 
 $diasSemana = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira',
                'quinta-feira', 'sexta-feira', 'sábado'];
@@ -35,7 +30,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo->beginTransaction();
 
-            // Só confirma a própria escala, publicada e de evento que ainda não terminou
             $stmt = $pdo->prepare(
                 "UPDATE escalas es
                    JOIN eventos ev ON ev.id = es.evento_id
@@ -48,7 +42,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([$escalaId, $usuario['id']]);
 
             if ($stmt->rowCount() === 1) {
-                registrarAuditoria($pdo, (int) $usuario['id'], 'ESCALA_CONFIRMADA', 'escalas', $escalaId);
+                if (function_exists('registrarAuditoria')) {
+                    registrarAuditoria($pdo, (int) $usuario['id'], 'ESCALA_CONFIRMADA', 'escalas', $escalaId);
+                }
                 $mensagem = ['tipo' => 'sucesso', 'texto' => 'Presença confirmada. Obrigado!'];
             } else {
                 $mensagem = ['tipo' => 'erro', 'texto' => 'Não foi possível confirmar esta escala.'];
@@ -63,7 +59,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // Recarrega a página para não reenviar o formulário com F5
     $_SESSION['flash'] = $mensagem;
     header('Location: minhas_escalas.php');
     exit;
@@ -73,7 +68,7 @@ $flash = $_SESSION['flash'] ?? null;
 unset($_SESSION['flash']);
 
 // ---------------------------------------------------------------
-// Dados da tela
+// Dados da tela - Minhas Escalas (Voluntário)
 // ---------------------------------------------------------------
 $sqlBase = "SELECT es.id, es.funcao, es.status,
                    ev.nome AS evento, ev.data, ev.hora_inicio, ev.hora_fim,
@@ -106,9 +101,62 @@ $stmt = $pdo->prepare(
 $stmt->execute([$usuario['id']]);
 $anteriores = $stmt->fetchAll();
 
+// ---------------------------------------------------------------
+// Dados da tela - Visão Geral (Apenas para ADMIN_GERAL e ADMIN_IGREJA)
+// ---------------------------------------------------------------
+$eventosAdmin = [];
+$responsaveis = []; // [evento_id][] = ['pessoa' => 'Nome', 'papel' => 'Mídia']
+
+if ($ehAdmin) {
+    if (($usuario['perfil'] ?? '') === 'ADMIN_GERAL') {
+        $stmtEv = $pdo->query(
+            "SELECT e.id, e.nome, e.data, e.hora_inicio, e.hora_fim, i.nome AS igreja
+               FROM eventos e
+               JOIN igrejas i ON i.id = e.igreja_id
+              WHERE TIMESTAMP(e.data, e.hora_fim) >= NOW()
+              ORDER BY e.data, e.hora_inicio"
+        );
+    } else {
+        $stmtEv = $pdo->prepare(
+            "SELECT e.id, e.nome, e.data, e.hora_inicio, e.hora_fim, i.nome AS igreja
+               FROM eventos e
+               JOIN igrejas i ON i.id = e.igreja_id
+              WHERE TIMESTAMP(e.data, e.hora_fim) >= NOW()
+                AND e.igreja_id = ?
+              ORDER BY e.data, e.hora_inicio"
+        );
+        $stmtEv->execute([$usuario['igreja_id'] ?? 0]);
+    }
+    $eventosAdmin = $stmtEv->fetchAll();
+
+    if ($eventosAdmin) {
+        $ids = array_column($eventosAdmin, 'id');
+        $in  = implode(',', array_fill(0, count($ids), '?'));
+
+        // Traz nome da pessoa, função atribuída e nome do departamento
+        $stmtResp = $pdo->prepare(
+            "SELECT es.evento_id, u.nome AS pessoa, es.funcao, d.nome AS departamento
+               FROM escalas es
+               JOIN usuarios u ON u.id = es.usuario_id
+               JOIN departamentos d ON d.id = es.departamento_id
+              WHERE es.evento_id IN ($in)
+              ORDER BY u.nome"
+        );
+        $stmtResp->execute($ids);
+
+        foreach ($stmtResp->fetchAll() as $r) {
+            $papel = !empty($r['funcao']) ? $r['funcao'] : $r['departamento'];
+            $responsaveis[(int) $r['evento_id']][] = [
+                'pessoa' => $r['pessoa'],
+                'papel'  => $papel
+            ];
+        }
+    }
+}
+
 $rotuloStatus = [
     'ENVIADA' => ['texto' => 'Aguardando sua confirmação', 'classe' => 'warning'],
-    'ACEITA'  => ['texto' => 'Confirmada',                 'classe' => 'success'],
+    'ACEITA'  => ['texto' => 'Confirmada',                  'classe' => 'success'],
 ];
 
 $titulo = 'Minhas escalas';
@@ -197,6 +245,66 @@ include __DIR__ . '/includes/topo.php';
             </li>
         <?php endforeach; ?>
     </ul>
+<?php endif; ?>
+
+<?php if ($ehAdmin): ?>
+    <hr class="my-5">
+    <section class="mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="h5 mb-0">Visão Geral de Eventos e Responsáveis</h2>
+            <span class="badge bg-dark">Acesso Administrativo</span>
+        </div>
+
+        <?php if ($eventosAdmin): ?>
+            <div class="table-responsive">
+                <table class="table table-striped table-bordered align-middle">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Data e Hora</th>
+                            <th>Evento</th>
+                            <?php if (($usuario['perfil'] ?? '') === 'ADMIN_GERAL'): ?>
+                                <th>Igreja</th>
+                            <?php endif; ?>
+                            <th>Escalados e Funções</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($eventosAdmin as $ev): ?>
+                            <?php $listaResp = $responsaveis[(int) $ev['id']] ?? []; ?>
+                            <tr>
+                                <td class="text-nowrap">
+                                    <strong><?= e(dataBR($ev['data'])) ?></strong><br>
+                                    <small class="text-muted">
+                                        <?= e(substr($ev['hora_inicio'], 0, 5)) ?> - <?= e(substr($ev['hora_fim'], 0, 5)) ?>
+                                    </small>
+                                </td>
+                                <td><?= e($ev['nome']) ?></td>
+                                <?php if (($usuario['perfil'] ?? '') === 'ADMIN_GERAL'): ?>
+                                    <td><?= e($ev['igreja']) ?></td>
+                                <?php endif; ?>
+                                <td>
+                                    <?php if ($listaResp): ?>
+                                        <ul class="list-unstyled mb-0 small">
+                                            <?php foreach ($listaResp as $item): ?>
+                                                <li>
+                                                    <strong><?= e($item['pessoa']) ?></strong>
+                                                    <span class="text-muted">- <?= e($item['papel']) ?></span>
+                                                </li>
+                                            <?php endforeach; ?>
+                                        </ul>
+                                    <?php else: ?>
+                                        <span class="text-muted">Ninguém escalado</span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php else: ?>
+            <p class="text-muted">Nenhum evento futuro cadastrado.</p>
+        <?php endif; ?>
+    </section>
 <?php endif; ?>
 
 <?php include __DIR__ . '/includes/rodape.php'; ?>
