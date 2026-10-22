@@ -56,18 +56,16 @@ try {
     $porta = (int) ($b['porta'] ?? 3306);
 
     $pdo = new PDO(
-        "mysql:host={$b['host']};port={$porta};dbname={$b['nome']};charset={$b['charset']}",
-        $b['usuario'],
-        $b['senha'],
-        [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES   => false,
-        ]
-    );
+    "pgsql:host={$b['host']};port={$porta};dbname={$b['nome']}",
+    $b['usuario'],
+    $b['senha'],
+    [
+        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    ]
+);
 
-    // Mesmo fuso horário no MySQL (para NOW() bater com o PHP)
-    $pdo->exec("SET time_zone = '" . date('P') . "'");
+   
 
 } catch (PDOException $e) {
     error_log('Erro de conexão com o banco: ' . $e->getMessage());
