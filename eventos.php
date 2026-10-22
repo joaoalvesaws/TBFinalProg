@@ -1,14 +1,18 @@
 <?php
-// src/eventos.php
+// eventos.php
 // Eventos (cultos, reuniões...) para os quais o líder monta a escala.
 // Líder, admin da igreja e admin geral. Cada um só enxerga a própria igreja
 // (o admin geral escolhe a igreja ao cadastrar).
+// Só o admin geral vê, em cada evento, quem é o responsável por cada função.
+
 
 require __DIR__ . '/includes/sessao.php';
+
 require __DIR__ . '/includes/util.php';
 
 $usuario = exigirPerfil('LIDER');
 $ehGeral = $usuario['perfil'] === 'ADMIN_GERAL';
+
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrfVerificar();
@@ -99,8 +103,66 @@ if ($ehGeral) {
 $eventos = $stmt->fetchAll();
 $igrejas = $ehGeral ? listarIgrejas($pdo) : [];
 
+// ---------------------------------------------------------------
+// SÓ O ADMIN GERAL: quem é o responsável por cada função de cada evento
+// (os outros perfis nem executam estas consultas)
+// ---------------------------------------------------------------
+$porEvento = [];   // [evento_id][departamento_id] = ['nome' => ..., 'pessoas' => [...]]
+$lideres   = [];   // [departamento_id] = [nomes dos líderes]
+
+$rotuloStatus = [
+    'RASCUNHO' => ['Rascunho',   'secondary'],
+    'ENVIADA'  => ['Publicada',  'primary'],
+    'ACEITA'   => ['Confirmada', 'success'],
+];
+
+if ($ehGeral && $eventos) {
+    $eventoIds = array_map(fn($linha) => (int) $linha['id'], $eventos);
+    $marcas    = implode(',', array_fill(0, count($eventoIds), '?'));
+
+    $stmt = $pdo->prepare(
+        "SELECT es.evento_id, es.departamento_id, d.nome AS departamento,
+                es.funcao, es.status, u.nome AS pessoa
+           FROM escalas es
+           JOIN departamentos d ON d.id = es.departamento_id
+           JOIN usuarios u      ON u.id = es.usuario_id
+          WHERE es.evento_id IN ($marcas)
+          ORDER BY d.nome, es.funcao, u.nome"
+    );
+    $stmt->execute($eventoIds);
+
+    $depIds = [];
+    foreach ($stmt->fetchAll() as $r) {
+        $eventoDaLinha = (int) $r['evento_id'];
+        $depDaLinha    = (int) $r['departamento_id'];
+        $porEvento[$eventoDaLinha][$depDaLinha]['nome']      = $r['departamento'];
+        $porEvento[$eventoDaLinha][$depDaLinha]['pessoas'][] = $r;
+        $depIds[$depDaLinha] = true;
+    }
+
+    if ($depIds) {
+        $depLista  = array_keys($depIds);
+        $marcasDep = implode(',', array_fill(0, count($depLista), '?'));
+
+        $stmt = $pdo->prepare(
+            "SELECT du.departamento_id, u.nome
+               FROM departamento_usuario du
+               JOIN usuarios u ON u.id = du.usuario_id
+              WHERE du.e_lider = 1 AND u.ativo = 1
+                AND du.departamento_id IN ($marcasDep)
+              ORDER BY u.nome"
+        );
+        $stmt->execute($depLista);
+        foreach ($stmt->fetchAll() as $r) {
+            $lideres[(int) $r['departamento_id']][] = $r['nome'];
+        }
+    }
+}
+
 $tituloPagina = 'Eventos';
+
 include __DIR__ . '/includes/topo.php';
+
 ?>
 
 <h1 class="h3 mb-3">Eventos</h1>
@@ -169,6 +231,7 @@ include __DIR__ . '/includes/topo.php';
                         <th>Evento</th>
                         <?php if ($ehGeral): ?><th>Igreja</th><?php endif; ?>
                         <th>Escalados</th>
+                        <?php if ($ehGeral): ?><th>Responsáveis</th><?php endif; ?>
                         <th></th>
                     </tr>
                 </thead>
@@ -184,6 +247,37 @@ include __DIR__ . '/includes/topo.php';
                         <td><?= e($ev['nome']) ?></td>
                         <?php if ($ehGeral): ?><td><?= e($ev['igreja']) ?></td><?php endif; ?>
                         <td><?= (int) $ev['pessoas'] ?></td>
+
+                        <?php if ($ehGeral): ?>
+                            <td>
+                                <?php $departamentos = $porEvento[(int) $ev['id']] ?? []; ?>
+                                <?php if (!$departamentos): ?>
+                                    <span class="text-muted">-</span>
+                                <?php else: ?>
+                                    <details>
+                                        <summary class="small">Ver responsáveis</summary>
+                                        <?php foreach ($departamentos as $depId => $d): ?>
+                                            <div class="small mt-2">
+                                                <strong><?= e($d['nome']) ?></strong>
+                                                <span class="text-muted">
+                                                    · Líder: <?= e(isset($lideres[$depId]) ? implode(', ', $lideres[$depId]) : 'sem líder definido') ?>
+                                                </span>
+                                                <ul class="list-unstyled mb-0 ms-2">
+                                                    <?php foreach ($d['pessoas'] as $p): ?>
+                                                        <?php $rotulo = $rotuloStatus[$p['status']] ?? [$p['status'], 'secondary']; ?>
+                                                        <li>
+                                                            <?= e($p['funcao'] ?: '-') ?>: <?= e($p['pessoa']) ?>
+                                                            <span class="badge text-bg-<?= e($rotulo[1]) ?>"><?= e($rotulo[0]) ?></span>
+                                                        </li>
+                                                    <?php endforeach; ?>
+                                                </ul>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </details>
+                                <?php endif; ?>
+                            </td>
+                        <?php endif; ?>
+
                         <td class="text-end">
                             <?php if ((int) $ev['pessoas'] === 0): ?>
                                 <form method="POST" class="d-inline">
@@ -198,7 +292,7 @@ include __DIR__ . '/includes/topo.php';
                     </tr>
                 <?php endforeach; ?>
                 <?php if (!$eventos): ?>
-                    <tr><td colspan="5" class="text-muted">Nenhum evento futuro cadastrado.</td></tr>
+                    <tr><td colspan="<?= $ehGeral ? 6 : 4 ?>" class="text-muted">Nenhum evento futuro cadastrado.</td></tr>
                 <?php endif; ?>
                 </tbody>
             </table>
