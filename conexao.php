@@ -4,13 +4,17 @@
 //
 // De onde vêm as configurações:
 //  1) No seu computador (Docker): do arquivo config/config.php, como antes.
-//  2) No Render (ou qualquer servidor sem esse arquivo): das VARIÁVEIS DE AMBIENTE
+//  2) No InfinityFree (ou qualquer servidor sem esse arquivo): das VARIÁVEIS DE AMBIENTE
 //     cadastradas no painel. Assim as senhas nunca ficam no Git.
 
-$arquivoConfig = __DIR__ . '/../config/config.php';
+$arquivoConfig = __DIR__ . '/config/config.php';
 
 if (is_file($arquivoConfig)) {
     $config = require $arquivoConfig;
+    //echo "<pre>";
+//print_r($config);
+//echo "</pre>";
+//exit;
 } else {
     $config = [
         'ambiente'     => getenv('APP_ENV') ?: 'producao',          // 'desenvolvimento' ou 'producao'
@@ -52,20 +56,16 @@ if ($config['ambiente'] === 'desenvolvimento') {
 }
 
 try {
-    $b     = $config['banco'];
-    $porta = (int) ($b['porta'] ?? 3306);
+
+    $b = $config['banco'];
 
     $pdo = new PDO(
-    "pgsql:host={$b['host']};port={$porta};dbname={$b['nome']}",
-    $b['usuario'],
-    $b['senha'],
-    [
-        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ]
-);
+        "mysql:host={$b['host']};dbname={$b['nome']};charset=utf8mb4",
+        $b['usuario'],
+        $b['senha']
+    );
 
-   
+  
 
 } catch (PDOException $e) {
     error_log('Erro de conexão com o banco: ' . $e->getMessage());
