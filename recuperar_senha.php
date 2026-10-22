@@ -19,31 +19,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $alvo = $s->fetch();
 
         if ($alvo) {
-    // Limites contra abuso (a cota de e-mails do plano gratuito é pequena):
-    //  - por pessoa: 1 pedido a cada 2 minutos e no máximo 3 por hora
-    //  - no sistema todo: no máximo 20 pedidos de recuperação por hora
-    // Passou do limite? Não envia nada, mas a resposta continua igual.
-    $porPessoa = $pdo->prepare(
-        "SELECT COUNT(*) AS na_hora,
-                COALESCE(SUM(criado_em > (NOW() - INTERVAL 2 MINUTE)), 0) AS nos_2min
-           FROM tokens_senha
-          WHERE usuario_id = ? AND tipo = 'RECUPERACAO'
-            AND criado_em > (NOW() - INTERVAL 1 HOUR)"
-    );
-    $porPessoa->execute([$alvo['id']]);
-    $p = $porPessoa->fetch();
+            // Limite: um pedido a cada 2 minutos por pessoa (evita encher a caixa de e-mail dela)
+            $recente = $pdo->prepare(
+                "SELECT 1 FROM tokens_senha
+                  WHERE usuario_id = ? AND tipo = 'RECUPERACAO'
+                    AND criado_em > (NOW() - INTERVAL 2 MINUTE)
+                  LIMIT 1"
+            );
+            $recente->execute([$alvo['id']]);
 
-    $geral = (int) $pdo->query(
-        "SELECT COUNT(*) FROM tokens_senha
-          WHERE tipo = 'RECUPERACAO' AND criado_em > (NOW() - INTERVAL 1 HOUR)"
-    )->fetchColumn();
-
-    if ((int) $p['na_hora'] < 3 && (int) $p['nos_2min'] === 0 && $geral < 20) {
-        $link = enviarConviteSenha($pdo, $alvo, 'RECUPERACAO');
-        auditar($pdo, (int) $alvo['id'], 'RECUPERACAO_SOLICITADA', 'usuarios', (int) $alvo['id']);
-        avisarLinkEmDesenvolvimento($link);
-    }
-}
+            if (!$recente->fetch()) {
+                $link = enviarConviteSenha($pdo, $alvo, 'RECUPERACAO');
+                auditar($pdo, (int) $alvo['id'], 'RECUPERACAO_SOLICITADA', 'usuarios', (int) $alvo['id']);
+                avisarLinkEmDesenvolvimento($link);
+            }
+        }
     }
 
     $pedidoFeito = true;   // mesma resposta em qualquer caso
