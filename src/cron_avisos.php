@@ -1,10 +1,25 @@
 <?php
-// src/cron_avisos.php
-// Roda a cada minuto (cron) e envia o que está na fila_envios.
-// Teste manual:  docker compose exec web php /var/www/html/cron_avisos.php
+ini_set('display_errors', '1');
+ini_set('display_startup_errors', '1');
+error_reporting(E_ALL);
 
-// Só pode rodar pelo terminal/cron, nunca pelo navegador
-if (PHP_SAPI !== 'cli') {
+register_shutdown_function(function() {
+    $error = error_get_last();
+    if ($error !== null && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR])) {
+        echo "<h3 style='color:red;'>ERRO FATAL NO CRON_AVISOS.PHP:</h3>";
+        echo "<pre style='background:#f8d7da; color:#721c24; padding:15px; border:1px solid #f5c6cb;'>";
+        echo "Mensagem: " . $error['message'] . "\n";
+        echo "Arquivo:  " . $error['file'] . "\n";
+        echo "Linha:    " . $error['line'] . "\n";
+        echo "</pre>";
+    }
+});
+
+// CHAVE DE SEGURANÇA
+define('CRON_KEY', 'Kosmos2026@');
+
+// Bloqueia se não for CLI e não passar a chave correta via GET
+if (PHP_SAPI !== 'cli' && ($_GET['key'] ?? '') !== CRON_KEY) {
     http_response_code(403);
     exit('Acesso negado.');
 }

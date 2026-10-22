@@ -1,10 +1,23 @@
 <?php
+    
 // src/login.php
 // Login por e-mail e senha. A página confere a senha por conta própria
 // (não precisa mais do processa_login.php).
+register_shutdown_function(function() {
+    $error = error_get_last();
+    if ($error !== null && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR])) {
+        $log = "Data: " . date('Y-m-d H:i:s') . "\n";
+        $log .= "Erro: " . $error['message'] . "\n";
+        $log .= "Arquivo: " . $error['file'] . " na linha " . $error['line'] . "\n\n";
+        file_put_contents($_SERVER['DOCUMENT_ROOT'] . '/erro_php.txt', $log, FILE_APPEND);
+    }
+});
 
 require __DIR__ . '/includes/sessao.php';
+
 require __DIR__ . '/includes/util.php';
+
+require __DIR__ . '/conexao.php';
 
 // Quem já está logado não precisa ver o login
 if (usuarioAtual() !== null) {

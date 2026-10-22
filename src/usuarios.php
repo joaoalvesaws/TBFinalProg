@@ -7,6 +7,15 @@
 // - cada um só cadastra perfis abaixo do seu (ver perfisQuePodeCriar em util.php)
 // - líder só cadastra voluntários nos departamentos que ele lidera
 // - admin da igreja só mexe na própria igreja
+register_shutdown_function(function() {
+    $error = error_get_last();
+    if ($error !== null && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR])) {
+        $log = "Data: " . date('Y-m-d H:i:s') . "\n";
+        $log .= "Erro: " . $error['message'] . "\n";
+        $log .= "Arquivo: " . $error['file'] . " na linha " . $error['line'] . "\n\n";
+        file_put_contents($_SERVER['DOCUMENT_ROOT'] . '/erro_php.txt', $log, FILE_APPEND);
+    }
+});
 
 require __DIR__ . '/includes/sessao.php';
 require __DIR__ . '/includes/util.php';

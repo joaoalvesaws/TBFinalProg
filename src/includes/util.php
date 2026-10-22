@@ -5,8 +5,12 @@
 //     require __DIR__ . '/includes/sessao.php';
 //     require __DIR__ . '/includes/util.php';
 
+
+
 require_once __DIR__ . '/auditoria.php';
+
 require_once __DIR__ . '/../notificar.php';
+
 
 
 // ---------------------------------------------------------------
@@ -227,7 +231,10 @@ function enviarConviteSenha(PDO $pdo, array $usuario, string $tipo = 'CONVITE'):
 
     $horas = $tipo === 'CONVITE' ? 72 : 2;
     $token = criarTokenSenha($pdo, (int) $usuario['id'], $tipo, $horas);
-    $base  = rtrim($config['app_url'] ?? 'http://localhost:8080', '/');
+   	$base = rtrim(
+    $config['url_base'] ?? 'https://kosmos.infinityfreeapp.com',
+    '/'
+);
     $link  = $base . '/definir_senha.php?token=' . $token;
 
     if ($tipo === 'CONVITE') {

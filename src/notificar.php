@@ -2,21 +2,13 @@
 // src/notificar.php
 // Camada ÚNICA de notificações. O resto do sistema só chama enfileirar();
 // quem envia de verdade é o cron_avisos.php, que chama enviarMensagem().
-// Para trocar de provedor (e-mail ou WhatsApp), só este arquivo muda.
-//
-// MODO SIMULAÇÃO: enquanto o provedor não estiver definido, nada é enviado:
-// a mensagem aparece no log (veja com: docker compose logs -f web).
-
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
 require_once __DIR__ . '/conexao.php';
 
 // ---------------------------------------------------------------
 // 1. Colocar uma mensagem na fila (chamado pelas telas)
 // ---------------------------------------------------------------
-// $canal: 'EMAIL' ou 'WHATSAPP'
-// $template: nome do modelo (ex.: 'convite_senha'). No WhatsApp é o nome
-//            do template aprovado na Meta.
-// $agendadoPara: 'AAAA-MM-DD HH:MM:SS' ou null para enviar já.
-// Devolve false se não puder enfileirar (ex.: WhatsApp sem consentimento).
 function enfileirar(PDO $pdo, int $usuarioId, string $canal, string $template,
                     string $mensagem, ?string $agendadoPara = null): bool
 {
@@ -45,7 +37,6 @@ function enfileirar(PDO $pdo, int $usuarioId, string $canal, string $template,
 // ---------------------------------------------------------------
 // 2. Enviar um item da fila (chamado pelo cron_avisos.php)
 // ---------------------------------------------------------------
-// Devolve true se enviou (ou simulou), false se falhou.
 function enviarMensagem(PDO $pdo, array $item): bool
 {
     $s = $pdo->prepare(
@@ -92,41 +83,111 @@ function enviarEmail(array $usuario, array $item): bool
 {
     global $config;
 
+    if (empty($usuario['email'])) {
+        error_log("[AVISO NOTIFICAÇÃO] Envio cancelado: e-mail do usuário está vazio.");
+        return false;
+    }
+
     $cfg     = $config['notificacoes']['email'] ?? [];
-    $modo    = $cfg['modo'] ?? 'simulacao';   // 'simulacao' ou 'smtp'
+    $modo    = $cfg['modo'] ?? 'simulacao';   // 'simulacao', 'api' ou 'smtp'
     $assunto = assuntoEmail((string) ($item['template'] ?? ''));
 
-    if ($modo !== 'smtp') {
+    // Modo 1: Simulação (apenas grava log)
+    if ($modo === 'simulacao') {
         error_log("[SIMULACAO E-MAIL] Para: {$usuario['email']} | Assunto: $assunto\n{$item['mensagem']}");
         return true;
     }
 
-    // Envio real por SMTP com PHPMailer (vendor/ montado no Docker em /var/www/vendor)
-    $autoload = __DIR__ . '/../vendor/autoload.php';
-    if (!is_file($autoload)) {
-        error_log('PHPMailer não encontrado (vendor/autoload.php). Rode o composer.');
+    // Modo 2: API HTTP Brevo (Ideal para InfinityFree)
+    if ($modo === 'api') {
+        $apiKey = $cfg['api_key'] ?? '';
+        if (empty($apiKey)) {
+            error_log('[ERRO E-MAIL] API Key do Brevo não configurada.');
+            return false;
+        }
+
+        $payload = [
+            'sender' => [
+                'name'  => $cfg['de_nome'] ?? 'Sistema de Escalas',
+                'email' => $cfg['de_email'] ?? 'joaoalves.compucenter@gmail.com'
+            ],
+            'to' => [
+                [
+                    'email' => $usuario['email'],
+                    'name'  => $usuario['nome'] ?? ''
+                ]
+            ],
+            'subject'     => $assunto,
+            'htmlContent' => nl2br(htmlspecialchars($item['mensagem']))
+        ];
+
+        $ch = curl_init('https://api.brevo.com/v3/smtp/email');
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => json_encode($payload),
+            CURLOPT_HTTPHEADER     => [
+                'accept: application/json',
+                'api-key: ' . $apiKey,
+                'content-type: application/json'
+            ],
+            CURLOPT_TIMEOUT        => 10,
+        ]);
+
+        $response  = curl_exec($ch);
+        $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErrno = curl_errno($ch);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+
+        if ($curlErrno) {
+            error_log("[ERRO cURL BREVO] {$curlError}");
+            return false;
+        }
+
+        if ($httpCode === 201 || $httpCode === 200) {
+            return true;
+        }
+
+        error_log("[ERRO BREVO API] HTTP $httpCode - Resposta: $response");
         return false;
     }
-    require_once $autoload;
 
-    $mail = new \PHPMailer\PHPMailer\PHPMailer(true);   // true = lança exceção em erro
-    $mail->isSMTP();
-    $mail->Host       = $cfg['host'];
-    $mail->Port       = (int) ($cfg['porta'] ?? 587);
-    $mail->SMTPAuth   = true;
-    $mail->Username   = $cfg['usuario'];
-    $mail->Password   = $cfg['senha'];
-    $mail->SMTPSecure = ($cfg['seguranca'] ?? 'tls') === 'ssl'
-        ? \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS
-        : \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
-    $mail->CharSet    = 'UTF-8';
-    $mail->setFrom($cfg['de_email'], $cfg['de_nome'] ?? 'Sistema de Escalas');
-    $mail->addAddress($usuario['email'], $usuario['nome']);
-    $mail->Subject    = $assunto;
-    $mail->Body       = $item['mensagem'];   // texto simples
-    $mail->send();
+    // Modo 3: SMTP tradicional via PHPMailer
+    if ($modo === 'smtp') {
+        $autoload = __DIR__ . '/../vendor/autoload.php';
+        if (!is_file($autoload)) {
+            error_log('PHPMailer não encontrado (vendor/autoload.php).');
+            return false;
+        }
+        require_once $autoload;
 
-    return true;
+        try {
+            $mail = new PHPMailer(true);
+            $mail->isSMTP();
+            $mail->Host       = $cfg['host'];
+            $mail->Port       = (int) ($cfg['porta'] ?? 587);
+            $mail->SMTPAuth   = true;
+            $mail->Username   = $cfg['usuario'];
+            $mail->Password   = $cfg['senha'];
+            $mail->SMTPSecure = ($cfg['seguranca'] ?? 'tls') === 'ssl'
+                ? \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS
+                : \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+            $mail->CharSet    = 'UTF-8';
+            $mail->setFrom($cfg['de_email'], $cfg['de_nome'] ?? 'Sistema de Escalas');
+            $mail->addAddress($usuario['email'], $usuario['nome'] ?? '');
+            $mail->Subject    = $assunto;
+            $mail->Body       = $item['mensagem'];
+            $mail->send();
+
+            return true;
+        } catch (\Exception $e) {
+            error_log('[ERRO SMTP] ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    return false;
 }
 
 // ---------------------------------------------------------------
@@ -136,15 +197,13 @@ function enviarWhatsapp(array $usuario, array $item): bool
 {
     global $config;
 
-    $modo = $config['notificacoes']['whatsapp']['modo'] ?? 'simulacao';  // 'simulacao' ou 'real'
+    $modo = $config['notificacoes']['whatsapp']['modo'] ?? 'simulacao';
 
-    // Segurança extra: nunca envia sem consentimento (LGPD)
     if (empty($usuario['consentimento_whatsapp_em']) || empty($usuario['telefone'])) {
         error_log("Fila #{$item['id']}: usuário sem consentimento ou sem telefone para WhatsApp.");
         return false;
     }
 
-    // Formato internacional: 55 + DDD + número
     $numero = '55' . preg_replace('/\D/', '', $usuario['telefone']);
 
     if ($modo !== 'real') {
@@ -152,9 +211,6 @@ function enviarWhatsapp(array $usuario, array $item): bool
         return true;
     }
 
-    // TODO (quando o provedor for escolhido): chamada HTTP com cURL à API
-    // oficial do WhatsApp (direto na Meta ou via provedor), usando o template
-    // aprovado. Devolver true só se a API confirmar o recebimento.
     error_log('Envio real de WhatsApp ainda não implementado.');
     return false;
 }
