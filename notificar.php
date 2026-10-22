@@ -2,8 +2,7 @@
 // src/notificar.php
 // Camada ÚNICA de notificações. O resto do sistema só chama enfileirar();
 // quem envia de verdade é o cron_avisos.php, que chama enviarMensagem().
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception;
+
 require_once __DIR__ . '/conexao.php';
 
 // ---------------------------------------------------------------
@@ -163,7 +162,7 @@ function enviarEmail(array $usuario, array $item): bool
         require_once $autoload;
 
         try {
-            $mail = new PHPMailer(true);
+            $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
             $mail->isSMTP();
             $mail->Host       = $cfg['host'];
             $mail->Port       = (int) ($cfg['porta'] ?? 587);
