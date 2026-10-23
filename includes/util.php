@@ -1,36 +1,25 @@
 <?php
-// src/includes/util.php
+// htdocs/includes/util.php
 // Funções auxiliares usadas por várias páginas.
-// Use sempre DEPOIS do sessao.php, no começo da página:
-//     require __DIR__ . '/includes/sessao.php';
-//     require __DIR__ . '/includes/util.php';
-
-
 
 require_once __DIR__ . '/auditoria.php';
-
 require_once __DIR__ . '/../notificar.php';
-
-
 
 // ---------------------------------------------------------------
 // Mensagens rápidas (aparecem uma vez no topo da página)
 // ---------------------------------------------------------------
 
-// $tipo: success, danger, warning ou info (cores do Bootstrap)
 function flash(string $tipo, string $mensagem): void
 {
     $_SESSION['flash'][] = ['tipo' => $tipo, 'msg' => $mensagem];
 }
 
-// Chamada pelo topo.php
 function flashExibir(): void
 {
     if (empty($_SESSION['flash'])) {
         return;
     }
     foreach ($_SESSION['flash'] as $f) {
-        // Só as mensagens de sucesso somem sozinhas (ver assets/app.js)
         $auto = $f['tipo'] === 'success' ? ' data-fecha-auto="6000"' : '';
         echo '<div class="alert alert-' . e($f['tipo']) . '"' . $auto . '>'
            . e($f['msg']) . '</div>';
@@ -48,14 +37,12 @@ function redirecionar(string $url): void
 // Ler campos de formulário com segurança
 // ---------------------------------------------------------------
 
-// Texto do POST sem espaços nas pontas ('' se não existir ou não for texto)
 function post(string $campo): string
 {
     $v = $_POST[$campo] ?? '';
     return is_string($v) ? trim($v) : '';
 }
 
-// Valor antigo do campo, já protegido, para refazer o formulário após um erro
 function antigo(string $campo): string
 {
     $v = $_POST[$campo] ?? '';
@@ -66,32 +53,31 @@ function antigo(string $campo): string
 // Validações
 // ---------------------------------------------------------------
 
-// Devolve a mensagem de erro, ou null se a senha for aceitável
 function validarSenha(string $senha): ?string
 {
     if (strlen($senha) < 8) {
         return 'A senha precisa ter pelo menos 8 caracteres.';
     }
-    if (strlen($senha) > 72) {   // limite do bcrypt, usado pelo password_hash
+    if (strlen($senha) > 72) {
         return 'A senha pode ter no máximo 72 caracteres.';
     }
     return null;
 }
 
-function dataValida(string $data): bool   // formato AAAA-MM-DD
+function dataValida(string $data): bool
 {
     $d = DateTime::createFromFormat('Y-m-d', $data);
     return $d !== false && $d->format('Y-m-d') === $data;
 }
 
-function horaValida(string $hora): bool   // formato HH:MM
+function horaValida(string $hora): bool
 {
     $d = DateTime::createFromFormat('H:i', $hora);
     return $d !== false && $d->format('H:i') === $hora;
 }
 
 // ---------------------------------------------------------------
-// Perfis e permissões (usa NIVEIS_PERFIL do sessao.php)
+// Perfis e permissões
 // ---------------------------------------------------------------
 
 const ROTULOS_PERFIL = [
@@ -106,10 +92,6 @@ function nivelPerfil(string $perfil): int
     return NIVEIS_PERFIL[$perfil] ?? 0;
 }
 
-// Regra: cada pessoa só cadastra perfis ABAIXO do seu.
-// Admin geral -> admin da igreja, líder, voluntário
-// Admin da igreja -> líder, voluntário
-// Líder -> voluntário
 function perfisQuePodeCriar(array $usuario): array
 {
     $meu   = nivelPerfil($usuario['perfil']);
@@ -122,10 +104,6 @@ function perfisQuePodeCriar(array $usuario): array
     return $lista;
 }
 
-// Pode $eu mexer na conta de $alvoId? (reenviar convite, ativar/desativar)
-// - só em perfis abaixo do seu
-// - admin da igreja: só da própria igreja
-// - líder: só quem está em um departamento que ele lidera
 function podeGerenciarUsuario(PDO $pdo, array $eu, int $alvoId): bool
 {
     $s = $pdo->prepare('SELECT id, igreja_id, perfil FROM usuarios WHERE id = ?');
@@ -163,8 +141,6 @@ function podeGerenciarUsuario(PDO $pdo, array $eu, int $alvoId): bool
 // Igrejas
 // ---------------------------------------------------------------
 
-// Qual igreja a tela deve usar? O admin geral escolhe no formulário;
-// os outros perfis usam a própria. Devolve null se não houver igreja válida.
 function igrejaDoContexto(PDO $pdo, array $usuario, $igrejaIdEnviado): ?int
 {
     if ($usuario['perfil'] !== 'ADMIN_GERAL') {
@@ -186,17 +162,15 @@ function listarIgrejas(PDO $pdo): array
 }
 
 // ---------------------------------------------------------------
-// Auditoria (usa registrarAuditoria() do includes/auditoria.php, mas
-// não derruba a tela se a gravação falhar; o erro vai para o log)
-// Exemplo: auditar($pdo, $usuario['id'], 'IGREJA_CRIADA', 'igrejas', $id, ['nome' => $nome]);
+// Auditoria
 // ---------------------------------------------------------------
+
 function auditar(PDO $pdo, ?int $usuarioId, string $acao, string $entidade,
                  ?int $entidadeId = null, array $dados = []): void
 {
     try {
         registrarAuditoria($pdo, $usuarioId, $acao, $entidade, $entidadeId, $dados);
     } catch (Throwable $ex) {
-        // Falha na auditoria não deve derrubar a tela, mas precisa ficar no log
         error_log('Falha ao gravar auditoria: ' . $ex->getMessage());
     }
 }
@@ -205,16 +179,13 @@ function auditar(PDO $pdo, ?int $usuarioId, string $acao, string $entidade,
 // Links de definir/recuperar senha
 // ---------------------------------------------------------------
 
-// Cria um token novo e invalida os anteriores ainda não usados.
-// Devolve o token "cru" (vai só no link); no banco fica apenas o hash.
 function criarTokenSenha(PDO $pdo, int $usuarioId, string $tipo, int $horasValidade): string
 {
     $pdo->prepare('UPDATE tokens_senha SET usado_em = NOW() WHERE usuario_id = ? AND usado_em IS NULL')
         ->execute([$usuarioId]);
 
-    $token = bin2hex(random_bytes(32));   // 64 caracteres, impossível de adivinhar
+    $token = bin2hex(random_bytes(32));
 
-    // $horasValidade é inteiro (cast), então é seguro escrever direto no SQL
     $pdo->prepare(
         'INSERT INTO tokens_senha (usuario_id, token_hash, tipo, expira_em)
          VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ' . (int) $horasValidade . ' HOUR))'
@@ -223,18 +194,13 @@ function criarTokenSenha(PDO $pdo, int $usuarioId, string $tipo, int $horasValid
     return $token;
 }
 
-// Cria o token, coloca o e-mail na fila e devolve o link.
-// $usuario precisa ter: id, nome. $tipo: 'CONVITE' ou 'RECUPERACAO'.
 function enviarConviteSenha(PDO $pdo, array $usuario, string $tipo = 'CONVITE'): string
 {
     global $config;
 
     $horas = $tipo === 'CONVITE' ? 72 : 2;
     $token = criarTokenSenha($pdo, (int) $usuario['id'], $tipo, $horas);
-   	$base = rtrim(
-    $config['url_base'] ?? 'https://kosmos.infinityfreeapp.com',
-    '/'
-);
+    $base  = rtrim($config['app_url'] ?? $config['url_base'] ?? 'https://kosmos.freehosting.dev', '/');
     $link  = $base . '/definir_senha.php?token=' . $token;
 
     if ($tipo === 'CONVITE') {
@@ -258,7 +224,6 @@ function enviarConviteSenha(PDO $pdo, array $usuario, string $tipo = 'CONVITE'):
     return $link;
 }
 
-// Só em desenvolvimento: mostra o link na tela para você testar sem e-mail
 function avisarLinkEmDesenvolvimento(string $link): void
 {
     global $config;
@@ -266,4 +231,46 @@ function avisarLinkEmDesenvolvimento(string $link): void
     if (($config['ambiente'] ?? '') === 'desenvolvimento') {
         flash('info', 'Só em desenvolvimento - link enviado por e-mail: ' . $link);
     }
+}
+
+/**
+ * Adiciona uma notificação de e-mail na fila_envios do banco de dados
+ * para ser processada pelo cron_avisos / notificar.php.
+ */
+function notificarUsuarioPorEmail(PDO $pdo, int $usuarioId, string $assunto, string $mensagemTexto): bool
+{
+    try {
+        // Busca o usuário ativo
+        $stmt = $pdo->prepare('SELECT id, nome, email FROM usuarios WHERE id = ? AND ativo = 1');
+        $stmt->execute([$usuarioId]);
+        $u = $stmt->fetch();
+
+        if (!$u || empty($u['email'])) {
+            return false;
+        }
+
+        $urlSite = 'https://kosmos.freehosting.dev';
+        $corpoTexto = "Olá, {$u['nome']}!\n\n"
+                    . "{$mensagemTexto}\n\n"
+                    . "Acesse o sistema para verificar: {$urlSite}";
+
+        // 1. Tenta usar a função enfileirar() do sistema
+        if (function_exists('enfileirar')) {
+            enfileirar($pdo, (int) $u['id'], 'EMAIL', $assunto, $corpoTexto);
+            return true;
+        }
+
+        // 2. Fallback: faz o INSERT diretamente na fila_envios se enfileirar() não estiver no escopo
+        $stmtFila = $pdo->prepare(
+            "INSERT INTO fila_envios (usuario_id, meio, assunto, mensagem, status, criado_em)
+             VALUES (?, 'EMAIL', ?, ?, 'PENDENTE', NOW())"
+        );
+        $stmtFila->execute([$u['id'], $assunto, $corpoTexto]);
+        return true;
+
+    } catch (Throwable $e) {
+        error_log('[ERRO AO ENFILEIRAR EMAIL] ' . $e->getMessage());
+    }
+
+    return false;
 }
