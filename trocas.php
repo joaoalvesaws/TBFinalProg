@@ -1,30 +1,10 @@
 <?php
-// Trocas de escala entre voluntários.
-//
-// Fluxo:
-//  1. O voluntário escolhe um colega do mesmo departamento para ASSUMIR a vaga dele.
-//  2. O colega aceita ou recusa.
-//  3. Ao aceitar, o sistema revalida as regras (regras.php) para o colega:
-//       - nenhuma regra violada: a troca é aplicada na hora, em transação;
-//       - alguma regra violada: o pedido vai para o líder (AGUARDANDO_LIDER).
-//  4. O líder aprova (a troca é aplicada) ou rejeita (a vaga continua com quem pediu).
-//
-// Condições que nem o líder pode ultrapassar (conferidas em validacaoRigida):
-//   a vaga ainda é de quem pediu, a escala está publicada, o evento ainda não
-//   começou, o colega é membro ativo do departamento e não está neste evento.
-//
-// O pedido vale até o início do evento (coluna trocas.validade).
-//
-// Colunas usadas em trocas: escala_id, solicitante_id, destinatario_id, status,
-//   precisa_lider, aprovado_por, validade, violacoes, respondido_em.
-//
-// Depende de: includes/sessao.php, regras.php, includes/auditoria.php,
-//             includes/topo.php e includes/rodape.php
+// Trocas de escala entre voluntários com notificações seguras por e-mail.
 
 require __DIR__ . '/includes/sessao.php';
+require_once __DIR__ . '/includes/util.php';
 require __DIR__ . '/regras.php';
 require_once __DIR__ . '/includes/auditoria.php';
-
 
 $usuario   = exigirLogin();
 $usuarioId = (int) $usuario['id'];
@@ -57,16 +37,12 @@ function nomeUsuario(PDO $pdo, int $id): string
     return $cache[$id];
 }
 
-// Aviso dentro do sistema (tabela notificacoes).
-// Quando o notificar.php existir, é AQUI que o envio por WhatsApp/e-mail
-// (tabela fila_envios) será acrescentado, num lugar só.
 function avisar(PDO $pdo, int $usuarioId, string $titulo, string $mensagem): void
 {
     $pdo->prepare('INSERT INTO notificacoes (usuario_id, titulo, mensagem) VALUES (?, ?, ?)')
         ->execute([$usuarioId, $titulo, $mensagem]);
 }
 
-// Executa $acao dentro de uma transação. Se der erro, desfaz tudo.
 function emTransacao(PDO $pdo, callable $acao): array
 {
     $pdo->beginTransaction();
@@ -79,7 +55,6 @@ function emTransacao(PDO $pdo, callable $acao): array
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
-        // Chave única: a pessoa já está escalada neste evento
         if ($e instanceof PDOException && $e->getCode() === '23000') {
             return resultado('erro', 'Não foi possível aplicar a troca: conflito com outra escala.');
         }
@@ -87,8 +62,6 @@ function emTransacao(PDO $pdo, callable $acao): array
     }
 }
 
-// Carrega o pedido de troca com os dados da escala e do evento,
-// travando as linhas até o fim da transação (FOR UPDATE).
 function carregarTroca(PDO $pdo, int $trocaId): ?array
 {
     $stmt = $pdo->prepare(
@@ -112,7 +85,6 @@ function carregarTroca(PDO $pdo, int $trocaId): ?array
     return $stmt->fetch() ?: null;
 }
 
-// Condições que não podem ser ultrapassadas. Devolve o motivo, ou null se estiver tudo certo.
 function validacaoRigida(PDO $pdo, array $t): ?string
 {
     if ((int) $t['dono_atual'] !== (int) $t['solicitante_id']) {
@@ -145,10 +117,8 @@ function validacaoRigida(PDO $pdo, array $t): ?string
     return null;
 }
 
-// Passa a vaga para o destinatário e fecha o pedido.
 function aplicarTroca(PDO $pdo, array $t, string $statusFinal, ?int $aprovadorId): void
 {
-    // Quem assume a vaga aceitou a troca, então a escala fica como confirmada (ACEITA)
     $pdo->prepare("UPDATE escalas SET usuario_id = ?, status = 'ACEITA' WHERE id = ?")
         ->execute([$t['destinatario_id'], $t['escala_id']]);
 
@@ -177,10 +147,9 @@ function podeAprovar(array $usuario, array $t, array $depsLideradas): bool
 }
 
 // ---------------------------------------------------------------
-// Ações
+// Ações de Troca
 // ---------------------------------------------------------------
 
-// 1) O voluntário pede a troca
 function solicitarTroca(PDO $pdo, array $usuario, int $escalaId, int $destId): array
 {
     $stmt = $pdo->prepare(
@@ -203,7 +172,6 @@ function solicitarTroca(PDO $pdo, array $usuario, int $escalaId, int $destId): a
         return resultado('erro', 'Escolha um colega para assumir a vaga.');
     }
 
-    // Só um pedido em aberto por vaga
     $stmt = $pdo->prepare(
         "SELECT 1 FROM trocas
           WHERE escala_id = ? AND status IN ('PENDENTE', 'AGUARDANDO_LIDER') LIMIT 1"
@@ -213,7 +181,6 @@ function solicitarTroca(PDO $pdo, array $usuario, int $escalaId, int $destId): a
         return resultado('erro', 'Já existe um pedido de troca em andamento para esta vaga.');
     }
 
-    // O colega precisa ser membro ativo do mesmo departamento
     $stmt = $pdo->prepare(
         'SELECT 1
            FROM departamento_usuario du
@@ -225,14 +192,12 @@ function solicitarTroca(PDO $pdo, array $usuario, int $escalaId, int $destId): a
         return resultado('erro', 'Essa pessoa não faz parte deste departamento.');
     }
 
-    // ...e não pode já estar neste evento
     $stmt = $pdo->prepare('SELECT 1 FROM escalas WHERE evento_id = ? AND usuario_id = ?');
     $stmt->execute([$escala['evento_id'], $destId]);
     if ($stmt->fetchColumn()) {
         return resultado('erro', 'Essa pessoa já está escalada neste evento.');
     }
 
-    // O pedido vale até o início do evento
     $pdo->prepare(
         'INSERT INTO trocas (escala_id, solicitante_id, destinatario_id, validade)
          VALUES (?, ?, ?, ?)'
@@ -252,10 +217,18 @@ function solicitarTroca(PDO $pdo, array $usuario, int $escalaId, int $destId): a
             . $escala['evento_nome'] . ' em ' . dataBR($escala['data']) . '.'
     );
 
+    if (function_exists('notificarUsuarioPorEmail')) {
+        notificarUsuarioPorEmail(
+            $pdo,
+            $destId,
+            'Nova solicitação de troca',
+            'Você recebeu uma nova solicitação de troca de escala. Acesse o site para verificar as solicitações pendentes.'
+        );
+    }
+
     return resultado('sucesso', 'Pedido enviado. Você será avisado quando o colega responder.');
 }
 
-// 2a) O colega recusa
 function recusarTroca(PDO $pdo, array $usuario, int $trocaId): array
 {
     $t = carregarTroca($pdo, $trocaId);
@@ -277,10 +250,18 @@ function recusarTroca(PDO $pdo, array $usuario, int $trocaId): array
             . ' em ' . dataBR($t['data']) . '. A vaga continua com você.'
     );
 
+    if (function_exists('notificarUsuarioPorEmail')) {
+        notificarUsuarioPorEmail(
+            $pdo,
+            (int) $t['solicitante_id'],
+            'Solicitação de troca recusada',
+            'Sua solicitação de troca de escala foi recusada. Acesse o site para verificar os detalhes.'
+        );
+    }
+
     return resultado('sucesso', 'Pedido recusado.');
 }
 
-// 2b) O colega aceita: revalida as regras e aplica ou envia ao líder
 function aceitarTroca(PDO $pdo, array $usuario, int $trocaId): array
 {
     $t = carregarTroca($pdo, $trocaId);
@@ -291,16 +272,24 @@ function aceitarTroca(PDO $pdo, array $usuario, int $trocaId): array
 
     $quando = $t['evento_nome'] . ' em ' . dataBR($t['data']);
 
-    // A situação pode ter mudado desde o pedido
     $motivo = validacaoRigida($pdo, $t);
     if ($motivo !== null) {
         encerrarTroca($pdo, $t, 'RECUSADA', [$motivo]);
         avisar($pdo, (int) $t['solicitante_id'], 'Pedido de troca cancelado',
             'O pedido de troca para ' . $quando . ' foi cancelado: ' . $motivo);
+
+        if (function_exists('notificarUsuarioPorEmail')) {
+            notificarUsuarioPorEmail(
+                $pdo,
+                (int) $t['solicitante_id'],
+                'Solicitação de troca recusada',
+                'Sua solicitação de troca de escala foi cancelada devido a um conflito nas regras. Acesse o site para verificar.'
+            );
+        }
+
         return resultado('erro', $motivo . ' O pedido foi cancelado.');
     }
 
-    // Regras de escala (bloqueio, dias seguidos, mesmo horário) para quem vai assumir
     $erros = violacoes($pdo, (int) $usuario['id'], $t, (int) $t['departamento_id']);
 
     if (!$erros) {
@@ -315,10 +304,18 @@ function aceitarTroca(PDO $pdo, array $usuario, int $trocaId): array
         avisar($pdo, (int) $t['solicitante_id'], 'Troca concluída',
             $usuario['nome'] . ' aceitou e assumiu a escala de ' . $quando . '.');
 
+        if (function_exists('notificarUsuarioPorEmail')) {
+            notificarUsuarioPorEmail(
+                $pdo,
+                (int) $t['solicitante_id'],
+                'Solicitação de troca aceita',
+                'Sua solicitação de troca de escala foi aceita. Acesse o site para conferir a atualização da sua escala.'
+            );
+        }
+
         return resultado('sucesso', 'Troca aceita. Agora você está escalado(a) em ' . $quando . '.');
     }
 
-    // Alguma regra foi violada: o líder decide
     $pdo->prepare(
         "UPDATE trocas
             SET status = 'AGUARDANDO_LIDER', precisa_lider = 1,
@@ -333,11 +330,18 @@ function aceitarTroca(PDO $pdo, array $usuario, int $trocaId): array
     avisar($pdo, (int) $t['solicitante_id'], 'Troca aguardando o líder',
         $usuario['nome'] . ' aceitou, mas a troca de ' . $quando . ' precisa da aprovação do líder.');
 
-    return resultado('sucesso', 'Você aceitou. Como a troca precisa da aprovação do líder, '
-        . 'ela só será aplicada se ele aprovar.');
+    if (function_exists('notificarUsuarioPorEmail')) {
+        notificarUsuarioPorEmail(
+            $pdo,
+            (int) $t['solicitante_id'],
+            'Troca aguardando aprovação do líder',
+            'O seu colega aceitou a troca, mas ela necessita da aprovação do líder. Acesse o site para acompanhar.'
+        );
+    }
+
+    return resultado('sucesso', 'Você aceitou. Como a troca precisa da aprovação do líder, ela só será aplicada se ele aprovar.');
 }
 
-// 3) O líder aprova ou rejeita
 function decidirTroca(PDO $pdo, array $usuario, int $trocaId, bool $aprovar, array $depsLideradas): array
 {
     $t = carregarTroca($pdo, $trocaId);
@@ -369,11 +373,18 @@ function decidirTroca(PDO $pdo, array $usuario, int $trocaId, bool $aprovar, arr
                 . nomeUsuario($pdo, (int) $t['solicitante_id']) . '.');
         }
 
+        if (function_exists('notificarUsuarioPorEmail')) {
+            notificarUsuarioPorEmail(
+                $pdo,
+                (int) $t['solicitante_id'],
+                'Solicitação de troca recusada pelo líder',
+                'Sua solicitação de troca de escala foi recusada pelo líder. Acesse o site para verificar os detalhes.'
+            );
+        }
+
         return resultado('sucesso', 'Pedido rejeitado. A vaga continua com quem pediu.');
     }
 
-    // Aprovar: o líder pode passar por cima das regras de escala,
-    // mas não das condições rígidas.
     $motivo = validacaoRigida($pdo, $t);
     if ($motivo !== null) {
         return resultado('erro', $motivo . ' Não é possível aprovar; rejeite o pedido.');
@@ -391,13 +402,22 @@ function decidirTroca(PDO $pdo, array $usuario, int $trocaId, bool $aprovar, arr
         avisar($pdo, $quem, 'Troca aprovada',
             'O líder aprovou a troca de ' . $quando . '. '
             . nomeUsuario($pdo, (int) $t['destinatario_id']) . ' assumiu a vaga.');
+
+        if (function_exists('notificarUsuarioPorEmail')) {
+            notificarUsuarioPorEmail(
+                $pdo,
+                $quem,
+                'Solicitação de troca aprovada',
+                'A solicitação de troca de escala foi aprovada pelo líder e atualizada no sistema. Acesse o site para conferir.'
+            );
+        }
     }
 
     return resultado('sucesso', 'Troca aprovada e aplicada.');
 }
 
 // ---------------------------------------------------------------
-// Departamentos que este usuário lidera (só para o perfil LIDER)
+// Departamentos que este usuário lidera
 // ---------------------------------------------------------------
 $depsLideradas = [];
 if ($usuario['perfil'] === 'LIDER') {
@@ -450,7 +470,6 @@ unset($_SESSION['flash']);
 // Dados da tela
 // ---------------------------------------------------------------
 
-// Formulário de pedido (vem de minhas_escalas.php?escala=ID -> trocas.php?escala=ID)
 $escalaIdForm = (int) ($_GET['escala'] ?? 0);
 $escalaForm   = null;
 $candidatos   = [];
@@ -499,7 +518,6 @@ $sqlLista = 'SELECT t.id, t.status, t.violacoes, t.criado_em,
                JOIN usuarios us     ON us.id = t.solicitante_id
                JOIN usuarios ud     ON ud.id = t.destinatario_id';
 
-// Pedidos que recebi e ainda posso responder
 $stmt = $pdo->prepare(
     $sqlLista . " WHERE t.destinatario_id = ? AND t.status = 'PENDENTE'
                     AND (t.validade IS NULL OR t.validade > NOW())
@@ -508,12 +526,10 @@ $stmt = $pdo->prepare(
 $stmt->execute([$usuarioId]);
 $recebidos = $stmt->fetchAll();
 
-// Pedidos que eu fiz (os 20 mais recentes)
 $stmt = $pdo->prepare($sqlLista . ' WHERE t.solicitante_id = ? ORDER BY t.id DESC LIMIT 20');
 $stmt->execute([$usuarioId]);
 $meusPedidos = $stmt->fetchAll();
 
-// Pedidos esperando decisão do líder (só os que este usuário pode decidir)
 $paraAprovar = [];
 if ($ehLider) {
     $stmt = $pdo->query(
