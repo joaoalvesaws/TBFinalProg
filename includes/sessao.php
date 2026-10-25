@@ -37,7 +37,7 @@ function sessaoIniciar(): void
     session_set_cookie_params([
         'lifetime' => 0,                                   // some ao fechar o navegador
         'path'     => '/',
-        'secure'   => $config['ambiente'] === 'producao',  // só HTTPS em produção
+        'secure' => !empty($_SERVER['HTTPS']), //se a pessoa errar a configuracao e nao colocar em producao, continua com https
         'httponly' => true,                                // JavaScript não lê o cookie
         'samesite' => 'Lax',                               // proteção extra contra CSRF
     ]);
@@ -50,6 +50,19 @@ function sessaoIniciar(): void
         sessaoDestruir();
         session_start();
     }
+    
+
+
+    if (
+    !isset($_SESSION['regenerado']) ||
+    time() - $_SESSION['regenerado'] > 1800 //vai renovar a sessao a cada 30 minutos, evitando fixacao de sessao
+) {
+    session_regenerate_id(true);
+    $_SESSION['regenerado'] = time();
+}
+
+
+
     $_SESSION['ultimo_acesso'] = time();
 }
 
@@ -204,3 +217,7 @@ function podeAcessarIgreja(array $usuario, int $igrejaId): bool
 
 // Inicia a sessão automaticamente ao incluir este arquivo
 sessaoIniciar();
+
+header('X-Frame-Options: SAMEORIGIN');
+header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: strict-origin-when-cross-origin'); //questoes de seguranca de https que faltavam de acordo com o site https://securityheaders.com/
