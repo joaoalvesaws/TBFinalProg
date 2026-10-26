@@ -270,7 +270,7 @@ include __DIR__ . '/includes/topo.php';
 
 <div class="row g-4">
     <!-- Formulário de cadastro -->
-    <div class="col-lg-4">
+    <div class="col-lg-3">
         <div class="card">
             <div class="card-body">
                 <h2 class="h5">Cadastrar pessoa</h2>
@@ -395,11 +395,14 @@ include __DIR__ . '/includes/topo.php';
                                 <span class="badge text-bg-secondary">Desativada</span>
                             <?php endif; ?>
                         </td>
-                        <td class="text-end text-nowrap">
+                        <td>
+                         <div class="d-flex flex-wrap gap-1 justify-content-end">
                             <?php if (nivelPerfil($p['perfil']) < $meuNivel): ?>
                                 <?php if ($p['ativo']): ?>
-                                        <a href="/usuario_editar.php?id=<?= (int) $p['id'] ?>"
-       class="btn btn-sm btn-outline-primary">Editar</a>
+                                        <a href="/usuario_editar.php?id=<?= (int)$p['id'] ?>"
+           class="btn btn-sm btn-outline-primary">
+            Editar
+        </a>
                                     <form method="POST" class="d-inline">
                                         <?= csrfCampo() ?>
                                         <input type="hidden" name="acao" value="reenviar">
