@@ -233,6 +233,55 @@ function avisarLinkEmDesenvolvimento(string $link): void
     }
 }
 
+
+
+function linkGoogleAgenda(
+    string $titulo,
+    string $inicio,
+    string $fim,
+    string $local = '',
+    string $descricao = ''
+): string {
+
+    return 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+        . '&text=' . urlencode($titulo)
+        . '&dates='
+        . gmdate('Ymd\THis\Z', strtotime($inicio))
+        . '/'
+        . gmdate('Ymd\THis\Z', strtotime($fim))
+        . '&location=' . urlencode($local)
+        . '&details=' . urlencode($descricao);
+}
+
+
+function tokenCalendario(PDO $pdo, int $usuarioId): string
+{
+    $stmt = $pdo->prepare(
+        'SELECT token FROM calendario_tokens WHERE usuario_id = ?'
+    );
+    $stmt->execute([$usuarioId]);
+
+    $token = $stmt->fetchColumn();
+
+    if ($token) {
+        return $token;
+    }
+
+    $token = bin2hex(random_bytes(32));
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO calendario_tokens (usuario_id, token)
+         VALUES (?, ?)'
+    );
+
+    $stmt->execute([$usuarioId, $token]);
+
+    return $token;
+}
+
+
+
+
 /**
  * Adiciona uma notificação de e-mail na fila_envios do banco de dados
  * para ser processada pelo cron_avisos / notificar.php.

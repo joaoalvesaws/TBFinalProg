@@ -1,5 +1,11 @@
 <?php
 // Tela do voluntário + Visão Geral com Responsáveis e Funções para Administradores.
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
+
+
 
 require __DIR__ . '/includes/sessao.php';
 require_once __DIR__ . '/includes/auditoria.php';
@@ -16,6 +22,26 @@ function dataBR(string $data): string
 {
     return date('d/m/Y', strtotime($data));
 }
+
+function gerarLinkGoogleAgenda(
+    string $titulo,
+    string $inicio,
+    string $fim,
+    string $local = '',
+    string $descricao = ''
+): string {
+
+    return 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+        . '&text=' . urlencode($titulo)
+        . '&dates='
+        . date('Ymd\THis', strtotime($inicio))
+        . '/'
+        . date('Ymd\THis', strtotime($fim))
+        . '&location=' . urlencode($local)
+        . '&details=' . urlencode($descricao);
+}
+
+
 
 // ---------------------------------------------------------------
 // Ação (POST): confirmar presença
@@ -165,7 +191,16 @@ include __DIR__ . '/includes/topo.php';
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0">Minhas escalas</h1>
-    <a href="bloqueios.php" class="btn btn-outline-secondary btn-sm">Bloquear datas</a>
+
+    <div class="d-flex gap-2">
+        <a href="bloqueios.php" class="btn btn-outline-secondary btn-sm">
+            Bloquear datas
+        </a>
+
+        <a href="sincronizar_calendario.php" class="btn btn-outline-success btn-sm">
+             Sincronizar Calendário
+        </a>
+    </div>
 </div>
 
 <p class="text-muted">Olá, <?= e($usuario['nome']) ?>.</p>
@@ -182,11 +217,45 @@ include __DIR__ . '/includes/topo.php';
     <p class="text-muted">Você não tem escalas publicadas para os próximos dias.</p>
 <?php else: ?>
     <div class="row g-3">
+        
+        
+        
+        
         <?php foreach ($proximas as $es): ?>
             <?php
-            $rotulo = $rotuloStatus[$es['status']] ?? ['texto' => $es['status'], 'classe' => 'secondary'];
-            $diaSemana = $diasSemana[(int) date('w', strtotime($es['data']))];
-            ?>
+$rotulo = $rotuloStatus[$es['status']] ?? [
+    'texto' => $es['status'],
+    'classe' => 'secondary'
+];
+
+$diaSemana = $diasSemana[(int) date('w', strtotime($es['data']))];
+
+$inicio = $es['data'] . ' ' . $es['hora_inicio'];
+$fim    = $es['data'] . ' ' . $es['hora_fim'];
+
+        
+        
+        
+        
+        
+$linkGoogle = gerarLinkGoogleAgenda(
+    'Escala - ' . $es['departamento'],
+    $inicio,
+    $fim,
+    $es['igreja'],
+    "Evento: {$es['evento']}\nFunção: {$es['funcao']}"
+);
+        
+        
+        
+        
+?>
+        
+        
+        
+        
+        
+        
             <div class="col-12 col-md-6">
                 <div class="card h-100">
                     <div class="card-body">
@@ -220,9 +289,21 @@ include __DIR__ . '/includes/topo.php';
 
                             <?php if ((int) $es['trocas_abertas'] > 0): ?>
                                 <span class="badge bg-info text-dark align-self-center">Troca em andamento</span>
+                            
+                            
                             <?php else: ?>
                                 <a href="trocas.php?escala=<?= (int) $es['id'] ?>"
                                    class="btn btn-outline-primary btn-sm">Pedir troca</a>
+                            
+                            
+                            
+                           <a href="<?= e($linkGoogle) ?>"
+       target="_blank"
+       class="btn btn-outline-success btn-sm">
+       Google Agenda
+    </a>         
+                            
+                            
                             <?php endif; ?>
                         </div>
                     </div>

@@ -18,6 +18,9 @@ $nivelMenu    = $usuarioMenu ? nivelPerfil($usuarioMenu['perfil']) : 0;
     <meta name="referrer" content="no-referrer">
     <title><?= e($tituloPagina) ?> | Escalas</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#212529">
+    <link rel="apple-touch-icon" href="/assets/icons/libya_2060733.png">
 </head>
 <body>
 

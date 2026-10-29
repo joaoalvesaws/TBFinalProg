@@ -1,0 +1,25 @@
+{
+  "name": "Kosmos TESTE",
+  "short_name": "Kosmos",
+  "description": "Sistema de Escalas",
+  "start_url": "/login.php",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#212529",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/assets/icons/icone192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/icons/icone512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
