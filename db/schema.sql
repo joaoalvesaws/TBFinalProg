@@ -121,15 +121,20 @@ CREATE TABLE fila_envios (
     id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     usuario_id    INT UNSIGNED NOT NULL,
     canal         ENUM('WHATSAPP','EMAIL') NOT NULL,
-    template      VARCHAR(80) NULL,          -- nome do template aprovado na Meta
+    template      VARCHAR(80) NULL,
     mensagem      TEXT NOT NULL,
-    status        ENUM('PENDENTE','EM_ENVIO','ENVIADO','ERRO') NOT NULL DEFAULT 'PENDENTE',
+    status        ENUM('PENDENTE','EM_ENVIO','ENVIADO','ERRO')
+                  NOT NULL DEFAULT 'PENDENTE',
     tentativas    TINYINT UNSIGNED NOT NULL DEFAULT 0,
     agendado_para DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     enviado_em    DATETIME NULL,
+    atualizado_em DATETIME NULL,
     criado_em     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
     INDEX idx_fila_pendentes (status, agendado_para),
-    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+
+    FOREIGN KEY (usuario_id)
+        REFERENCES usuarios(id)
 ) ENGINE=InnoDB;
 
 
@@ -153,8 +158,7 @@ CREATE TABLE tokens_senha (
 
 -- 2) A fila ganha um carimbo de hora para o cron destravar envios
 --    que ficaram presos em EM_ENVIO (ex.: o script caiu no meio).
-ALTER TABLE fila_envios
-    ADD COLUMN atualizado_em DATETIME NULL AFTER enviado_em;
+
 
     CREATE TABLE vagas (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -186,3 +190,19 @@ CREATE TABLE IF NOT EXISTS eventos_padrao (
     CONSTRAINT ck_padrao_dia CHECK (dia_semana BETWEEN 0 AND 6),
     FOREIGN KEY (igreja_id) REFERENCES igrejas(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Calendários sincronizados (Google Agenda, Outlook, Apple Calendar)
+
+CREATE TABLE calendario_tokens (
+    usuario_id INT UNSIGNED NOT NULL,
+    token CHAR(64) NOT NULL,
+    criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (usuario_id),
+    UNIQUE KEY uq_calendario_token (token),
+
+    FOREIGN KEY (usuario_id)
+        REFERENCES usuarios(id)
+        ON DELETE CASCADE
+) ENGINE=InnoDB;
+
